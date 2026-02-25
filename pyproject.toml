@@ -1,0 +1,10 @@
+[project]
+name = "mea-rasterplotter"
+version = "0.0.1"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Arjan Mossel", email = "arjanmossel@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
