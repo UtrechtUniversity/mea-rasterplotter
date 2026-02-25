@@ -7,4 +7,6 @@ authors = [
     { name = "Arjan Mossel", email = "arjanmossel@gmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "marimo>=0.20.2",
+]
