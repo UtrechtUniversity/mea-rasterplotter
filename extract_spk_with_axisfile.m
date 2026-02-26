@@ -35,43 +35,51 @@ function extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
         mkdir(out_parent);
     end
 
-    AllData = AxisFile(spk_path).SpikeData.LoadData;
-    final_results = [];
-    [nwr, nwc, nec, ner] = size(AllData);
+    spike_dataset = AxisFile(spk_path).SpikeData;
+    spike_rows = struct( ...
+        'WellRow', [], ...
+        'WellColumn', [], ...
+        'ElectrodeColumn', [], ...
+        'ElectrodeRow', [], ...
+        'Timestamp', [], ...
+        'MaximumAmplitude', [], ...
+        'MinimumAmplitude', [], ...
+        'PeakToPeakAmplitude', []);
 
-    for wr = 1:nwr
-        for wc = 1:nwc
-            for ec = 1:nec
-                for er = 1:ner
-                    data = AllData{wr, wc, ec, er};
-                    if ~isempty(data)
-                        [t, v] = data.GetTimeVoltageVector;
-                        timestamp = t(1, :);
-                        timestamp_length = length(timestamp);
-
-                        channel_label = str2double(strcat(num2str(ec), num2str(er)));
-                        channel_label = repelem(channel_label, timestamp_length);
-
-                        well_label = str2double(strcat(num2str(wr), num2str(wc)));
-                        well_label = repelem(well_label, timestamp_length);
-
-                        min_amplitude = min(v);
-                        max_amplitude = max(v);
-                        peak_to_peak_amplitude = max_amplitude - min_amplitude;
-
-                        combined_data = transpose([
-                            channel_label;
-                            well_label;
-                            timestamp;
-                            max_amplitude;
-                            min_amplitude;
-                            peak_to_peak_amplitude
-                        ]);
-                        final_results = [final_results; combined_data];
-                    end
-                end
+    if ~isempty(spike_dataset)
+        for ds_idx = 1:numel(spike_dataset)
+            current_rows = spike_dataset(ds_idx).LoadAllSpikesDetailed();
+            if isempty(spike_rows.Timestamp)
+                spike_rows = current_rows;
+            elseif ~isempty(current_rows.Timestamp)
+                spike_rows.WellRow = [spike_rows.WellRow, current_rows.WellRow];
+                spike_rows.WellColumn = [spike_rows.WellColumn, current_rows.WellColumn];
+                spike_rows.ElectrodeColumn = [spike_rows.ElectrodeColumn, current_rows.ElectrodeColumn];
+                spike_rows.ElectrodeRow = [spike_rows.ElectrodeRow, current_rows.ElectrodeRow];
+                spike_rows.Timestamp = [spike_rows.Timestamp, current_rows.Timestamp];
+                spike_rows.MaximumAmplitude = [spike_rows.MaximumAmplitude, current_rows.MaximumAmplitude];
+                spike_rows.MinimumAmplitude = [spike_rows.MinimumAmplitude, current_rows.MinimumAmplitude];
+                spike_rows.PeakToPeakAmplitude = [spike_rows.PeakToPeakAmplitude, current_rows.PeakToPeakAmplitude];
             end
         end
+    end
+
+    final_results = [];
+    if ~isempty(spike_rows.Timestamp)
+        electrode_digits = floor(log10(spike_rows.ElectrodeRow)) + 1;
+        well_digits = floor(log10(spike_rows.WellColumn)) + 1;
+
+        channel_label = spike_rows.ElectrodeColumn .* (10 .^ electrode_digits) + spike_rows.ElectrodeRow;
+        well_label = spike_rows.WellRow .* (10 .^ well_digits) + spike_rows.WellColumn;
+
+        final_results = [ ...
+            channel_label(:), ...
+            well_label(:), ...
+            spike_rows.Timestamp(:), ...
+            spike_rows.MaximumAmplitude(:), ...
+            spike_rows.MinimumAmplitude(:), ...
+            spike_rows.PeakToPeakAmplitude(:) ...
+        ];
     end
 
     fid = fopen(output_csv, 'w');
