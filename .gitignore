@@ -11,3 +11,6 @@ __marimo__/
 
 # Virtual environments
 .venv
+
+# Octave session dump file
+octave-workspace
