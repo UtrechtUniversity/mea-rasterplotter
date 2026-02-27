@@ -9,4 +9,7 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "marimo>=0.20.2",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.2",
+    "polars>=1.38.1",
 ]
