@@ -68,6 +68,8 @@ function extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
 
     final_results = [];
     if ~isempty(spike_rows.WaveformStartTime)
+        spike_rows = sort_spike_rows_for_csv(spike_rows);
+
         electrode_digits = floor(log10(spike_rows.ElectrodeRow)) + 1;
         well_digits = floor(log10(spike_rows.WellColumn)) + 1;
 
@@ -105,4 +107,36 @@ function extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
     end
 
     fprintf('Wrote CSV: %s\n', output_csv);
+end
+
+function sorted_rows = sort_spike_rows_for_csv(spike_rows)
+%SORT_SPIKE_ROWS_FOR_CSV Recreate the MATLAB script row ordering.
+%   The reference scripts iterate in nested WellRow/WellColumn/
+%   ElectrodeColumn/ElectrodeRow order and then emit spikes within each
+%   waveform group by waveform start time. SpikeTime is kept as a final
+%   tie-breaker so the sort stays deterministic if two spikes share the
+%   same start time.
+
+    if isempty(spike_rows.WaveformStartTime)
+        sorted_rows = spike_rows;
+        return;
+    end
+
+    sort_keys = [ ...
+        spike_rows.WellRow(:), ...
+        spike_rows.WellColumn(:), ...
+        spike_rows.ElectrodeColumn(:), ...
+        spike_rows.ElectrodeRow(:), ...
+        spike_rows.WaveformStartTime(:), ...
+        spike_rows.SpikeTime(:) ...
+    ];
+    [~, sort_idx] = sortrows(sort_keys, [1 2 3 4 5 6]);
+    sort_idx = reshape(sort_idx, 1, []);
+
+    sorted_rows = spike_rows;
+    field_names = fieldnames(spike_rows);
+    for field_idx = 1:numel(field_names)
+        field_name = field_names{field_idx};
+        sorted_rows.(field_name) = spike_rows.(field_name)(sort_idx);
+    end
 end
