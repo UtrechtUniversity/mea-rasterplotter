@@ -262,22 +262,31 @@ def _(
 
 
 @app.cell
+def _(default_spike_csv, mo, spike_csv_path):
+    selected_spike_csv = spike_csv_path.path(0)
+    spike_csv = selected_spike_csv or (default_spike_csv if default_spike_csv.is_file() else "")
+    mo.stop(
+        not spike_csv,
+        mo.md("Select a spike CSV to continue.").callout(kind="warn"),
+    )
+    return (spike_csv,)
+
+
+@app.cell
 def _(
-    default_spike_csv,
     load_spike_csv,
     load_well_annotations,
     normalize_and_map_wells,
     repo_root,
     resolve_input_path,
-    spike_csv_path,
+    spike_csv,
     well_annotations_path,
 ):
-    spike_csv = spike_csv_path.path(0) or default_spike_csv
     annotation_csv = resolve_input_path(well_annotations_path.value, repo_root)
     spikes = load_spike_csv(spike_csv)
     annotations = load_well_annotations(annotation_csv)
     rasterplot_data = normalize_and_map_wells(spikes, annotations)
-    return annotation_csv, rasterplot_data, spike_csv
+    return annotation_csv, rasterplot_data
 
 
 @app.cell
@@ -305,9 +314,10 @@ def _(np, pl, rasterplot_data):
 
 @app.cell
 def _(mo, slider_start, slider_stop, wells):
+    selected_well_value = wells[0] if wells else None
     selected_well = mo.ui.dropdown(
         options=wells,
-        value=wells[0],
+        value=selected_well_value,
         label="Selected well",
     )
 
@@ -386,7 +396,7 @@ def _(
 
 @app.cell
 def _(filter_well_window, plot_settings, rasterplot_data, selected_well):
-    well_label = str(selected_well.value).strip()
+    well_label = "" if selected_well.value is None else str(selected_well.value).strip()
     well_data = filter_well_window(
         rasterplot_data,
         well_label,
@@ -432,7 +442,9 @@ def _(
     x_pad_left,
     x_pad_right,
 ):
-    selected_spike_csv = spike_csv_path.path(0) or default_spike_csv
+    selected_spike_csv = spike_csv_path.path(0) or (
+        default_spike_csv if default_spike_csv.is_file() else ""
+    )
     input_widgets = [
         mo.md("### Inputs"),
         mo.md(f"Selected spike CSV: `{selected_spike_csv}`"),
@@ -487,14 +499,16 @@ def _(
     well_label,
     wells,
 ):
+    selected_well_label = well_label or "None"
+    selected_spike_csv = spike_csv or ""
     mo.md(
         "\n".join(
             [
                 "### Data Summary",
-                f"- Spike CSV: `{spike_csv}`",
+                f"- Spike CSV: `{selected_spike_csv}`",
                 f"- Well annotations CSV: `{annotation_csv}`",
                 f"- Available wells in data: `{len(wells)}`",
-                f"- Selected well: `{well_label}`",
+                f"- Selected well: `{selected_well_label}`",
                 f"- Spikes in current view: `{well_data.height}`",
                 f"- Channels in current view: `{len(channel_labels)}`",
             ]
