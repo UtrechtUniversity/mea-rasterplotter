@@ -24,6 +24,7 @@ def _():
     }
     WELL_REQUIRED_COLUMNS = {"Well_Label", "Well_Label_num"}
 
+    @dataclass
     class PlotSettings:
         start_time: float
         end_time: float
