@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.2"
+__generated_with = "0.20.4"
 app = marimo.App(width="medium")
 
 
@@ -85,21 +85,58 @@ def _():
 @app.cell
 def _(Path):
     notebook_dir = Path(__file__).resolve().parent
-    repo_root = notebook_dir.parent
 
     wrapper_script = notebook_dir / "extract_spk_with_axisfile.m"
     loader_dir = notebook_dir / "vendor" / "AxionFileLoader" / "AxionFileLoader"
-    spk_path = (
-        repo_root
+    default_spk_path = (
+        notebook_dir.parent
         / "data"
         / "201023_LvM_256086_1268-20_MEA_rCortex_Permethrin_baseline_female_DIV11(000)_Spike Detector (7 x STD)(000).spk"
     )
-    output_csv_path = spk_path.with_suffix(".csv")
-    return loader_dir, output_csv_path, spk_path, wrapper_script
+    return default_spk_path, loader_dir, wrapper_script
 
 
 @app.cell
-def _(loader_dir, mo, output_csv_path, shutil, spk_path, wrapper_script):
+def _(default_spk_path, mo):
+    show_spk_picker, set_show_spk_picker = mo.state(not default_spk_path.is_file())
+    return set_show_spk_picker, show_spk_picker
+
+
+@app.cell
+def _(default_spk_path, mo, set_show_spk_picker):
+    spk_path_toggle = mo.ui.button(
+        label="Choose/change SPK file",
+        on_click=lambda _: set_show_spk_picker(lambda current: not current),
+    )
+    spk_path_picker = mo.ui.file_browser(
+        initial_path=default_spk_path.parent,
+        filetypes=[".spk"],
+        multiple=False,
+        label="SPK file",
+        on_change=lambda _: set_show_spk_picker(False),
+    )
+    return spk_path_picker, spk_path_toggle
+
+
+@app.cell
+def _(default_spk_path, spk_path_picker):
+    spk_path = spk_path_picker.path(0) or default_spk_path
+    output_csv_path = spk_path.with_suffix(".csv")
+    return output_csv_path, spk_path
+
+
+@app.cell
+def _(
+    loader_dir,
+    mo,
+    output_csv_path,
+    show_spk_picker,
+    shutil,
+    spk_path,
+    spk_path_picker,
+    spk_path_toggle,
+    wrapper_script,
+):
     octave_bin = shutil.which("octave")
 
     status = [
@@ -110,7 +147,16 @@ def _(loader_dir, mo, output_csv_path, shutil, spk_path, wrapper_script):
         f"- Output .csv file: `{output_csv_path}`",
     ]
 
-    mo.md("## Configuration\n" + "\n".join(status))
+    controls = [spk_path_toggle]
+    if show_spk_picker():
+        controls.append(spk_path_picker)
+
+    mo.vstack(
+        [
+            mo.md("## Configuration\n" + "\n".join(status)),
+            mo.hstack(controls, align="start"),
+        ]
+    )
     return (octave_bin,)
 
 
