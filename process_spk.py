@@ -42,7 +42,7 @@ def _():
             f"output_csv='{quote_for_octave(csv_path)}';"
             f"loader_dir='{quote_for_octave(loader_dir)}';"
             "try;"
-            "extract_spk_with_axisfile(spk_path, output_csv, loader_dir);"
+            "extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir);"
             "catch ME;"
             "fprintf(2, 'ERROR: %s\\n', ME.message);"
             "for k = 1:numel(ME.stack);"
@@ -86,7 +86,7 @@ def _():
 def _(Path):
     notebook_dir = Path(__file__).resolve().parent
 
-    wrapper_script = notebook_dir / "extract_spk_with_axisfile.m"
+    wrapper_script = notebook_dir / "extract_spk_with_axisfile_octave.m"
     loader_dir = notebook_dir / "vendor" / "AxionFileLoader" / "AxionFileLoader"
     default_spk_path = (
         notebook_dir.parent

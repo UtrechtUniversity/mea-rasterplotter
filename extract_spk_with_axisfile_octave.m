@@ -1,13 +1,16 @@
-function extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
-%EXTRACT_SPK_WITH_AXISFILE Convert one Axion .spk file to CSV using AxisFile.
-%   extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
+function extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir)
+%EXTRACT_SPK_WITH_AXISFILE_OCTAVE Convert one Axion .spk file to CSV.
+%   extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir)
 %
 %   - spk_path: path to input .spk file
 %   - output_csv: path to output .csv file (optional; defaults to spk basename)
 %   - loader_dir: path to AxionFileLoader class files (optional)
+%
+%   This wrapper is specific to the experimental feature/octave branch of
+%   AxionFileLoader in mea-rasterplotter/vendor/AxionFileLoader.
 
     if nargin < 1 || isempty(spk_path)
-        error('extract_spk_with_axisfile:MissingInput', 'spk_path is required.');
+        error('extract_spk_with_axisfile_octave:MissingInput', 'spk_path is required.');
     end
 
     if nargin < 2 || isempty(output_csv)
@@ -21,13 +24,16 @@ function extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
     end
 
     if exist(spk_path, 'file') ~= 2
-        error('extract_spk_with_axisfile:MissingFile', 'SPK file not found: %s', spk_path);
+        error('extract_spk_with_axisfile_octave:MissingFile', 'SPK file not found: %s', spk_path);
     end
 
     if exist(loader_dir, 'dir') ~= 7
-        error('extract_spk_with_axisfile:MissingLoader', 'AxionFileLoader directory not found: %s', loader_dir);
+        error('extract_spk_with_axisfile_octave:MissingLoader', 'AxionFileLoader directory not found: %s', loader_dir);
     end
 
+    % This addpath is expected to point at the vendored feature/octave
+    % AxionFileLoader tree. That branch adds Octave compatibility shims and
+    % the LoadAllSpikesDetailed() helper used below.
     addpath(loader_dir);
 
     out_parent = fileparts(output_csv);
@@ -49,6 +55,13 @@ function extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
 
     if ~isempty(spike_dataset)
         for ds_idx = 1:numel(spike_dataset)
+            % Octave-specific dependency:
+            % the original Axion MATLAB example uses
+            % SpikeData.LoadData + waveform.GetTimeVoltageVector().
+            % This wrapper instead depends on the vendored
+            % LoadAllSpikesDetailed() method, which was added in the
+            % feature/octave loader branch to avoid MATLAB-only waveform
+            % object construction paths while preserving equivalent fields.
             current_rows = spike_dataset(ds_idx).LoadAllSpikesDetailed();
             if isempty(spike_rows.WaveformStartTime)
                 spike_rows = current_rows;
@@ -90,7 +103,7 @@ function extract_spk_with_axisfile(spk_path, output_csv, loader_dir)
 
     fid = fopen(output_csv, 'w');
     if fid < 0
-        error('extract_spk_with_axisfile:OpenOutput', 'Unable to open output CSV: %s', output_csv);
+        error('extract_spk_with_axisfile_octave:OpenOutput', 'Unable to open output CSV: %s', output_csv);
     end
 
     fprintf(fid, '%s,%s,%s,%s,%s,%s\n', ...
