@@ -160,7 +160,7 @@ def _():
         )
 
         if events:
-            line_offsets = np.arange(1, len(events) + 1, dtype=float)
+            line_offsets = np.arange(1, len(events) + 1, dtype=float).tolist()
             ax.eventplot(
                 events,
                 orientation="horizontal",
