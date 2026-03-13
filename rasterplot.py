@@ -1,7 +1,15 @@
 import marimo
 
-__generated_with = "0.20.2"
+__generated_with = "0.20.4"
 app = marimo.App(width="full")
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Setup
+    """)
+    return
 
 
 @app.cell
@@ -371,6 +379,14 @@ def _(build_event_series, plot_settings, render_raster, well_data, well_label):
     return channel_labels, fig
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Plot
+    """)
+    return
+
+
 @app.cell
 def _(
     end_time,
@@ -417,6 +433,14 @@ def _(
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Summary
+    """)
+    return
+
+
 @app.cell
 def _(
     annotation_csv,
@@ -440,6 +464,11 @@ def _(
             ]
         )
     )
+    return
+
+
+@app.cell
+def _():
     return
 
 
