@@ -231,7 +231,12 @@ def _(Path):
 
 @app.cell
 def _(default_spike_csv, default_well_annotations_csv, mo):
-    spike_csv_path = mo.ui.text(label="Spike CSV path", value=str(default_spike_csv))
+    spike_csv_path = mo.ui.file_browser(
+        initial_path=default_spike_csv.parent,
+        filetypes=[".csv"],
+        multiple=False,
+        label="Spike CSV file",
+    )
     well_annotations_path = mo.ui.text(
         label="Well annotation CSV path", value=str(default_well_annotations_csv)
     )
@@ -240,6 +245,7 @@ def _(default_spike_csv, default_well_annotations_csv, mo):
 
 @app.cell
 def _(
+    default_spike_csv,
     load_spike_csv,
     load_well_annotations,
     normalize_and_map_wells,
@@ -248,7 +254,7 @@ def _(
     spike_csv_path,
     well_annotations_path,
 ):
-    spike_csv = resolve_input_path(spike_csv_path.value, repo_root)
+    spike_csv = spike_csv_path.path(0) or default_spike_csv
     annotation_csv = resolve_input_path(well_annotations_path.value, repo_root)
     spikes = load_spike_csv(spike_csv)
     annotations = load_well_annotations(annotation_csv)
