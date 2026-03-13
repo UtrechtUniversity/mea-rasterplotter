@@ -6,8 +6,10 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    import os
     from pathlib import Path
     import shutil
+    from string import Template
     import subprocess
 
     import marimo as mo
@@ -48,7 +50,9 @@ def _():
 
         if runtime == "matlab":
             if not matlab_bin:
-                blockers.append("MATLAB is selected but `matlab` was not found on PATH.")
+                blockers.append(
+                    "MATLAB is selected but no usable MATLAB executable is configured."
+                )
             return notes, blockers
 
         if runtime == "octave":
@@ -69,12 +73,98 @@ def _():
         blockers.append(f"Unsupported runtime selection: {runtime}")
         return notes, blockers
 
+    def parse_env_overrides(raw_text: str) -> tuple[dict[str, str], list[str]]:
+        overrides: dict[str, str] = {}
+        errors: list[str] = []
+
+        for line_number, raw_line in enumerate(raw_text.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            key_part, separator, value_part = raw_line.partition("=")
+            if separator != "=":
+                errors.append(
+                    f"MATLAB environment line {line_number} must use `KEY=VALUE` format."
+                )
+                continue
+
+            key = key_part.strip()
+            if not key:
+                errors.append(
+                    f"MATLAB environment line {line_number} is missing a variable name."
+                )
+                continue
+
+            if not (key[0].isalpha() or key[0] == "_") or any(
+                not (char.isalnum() or char == "_") for char in key[1:]
+            ):
+                errors.append(
+                    f"MATLAB environment variable `{key}` on line {line_number} is invalid."
+                )
+                continue
+
+            overrides[key] = value_part.lstrip()
+
+        return overrides, errors
+
+    def resolve_matlab_executable(
+        *,
+        configured_path: str,
+        detected_path: str | None,
+        env_overrides: dict[str, str],
+    ) -> tuple[str | None, list[str], bool]:
+        merged_env = os.environ.copy()
+        merged_env.update(env_overrides)
+
+        configured_path = configured_path.strip()
+        if not configured_path:
+            discovered_path = shutil.which("matlab", path=merged_env.get("PATH"))
+            return discovered_path or detected_path, [], False
+
+        expanded_path = Template(configured_path).safe_substitute(merged_env)
+        candidate = Path(expanded_path).expanduser()
+
+        if not candidate.is_absolute():
+            return (
+                None,
+                [
+                    "Configured MATLAB executable path must be absolute. "
+                    "You can use environment variables inside it, for example "
+                    "`$MATLAB_HOME/bin/matlab`."
+                ],
+                True,
+            )
+
+        resolved_candidate = candidate.resolve()
+        if not resolved_candidate.exists():
+            return (
+                None,
+                [f"Configured MATLAB executable was not found: `{resolved_candidate}`"],
+                True,
+            )
+        if resolved_candidate.is_dir():
+            return (
+                None,
+                [f"Configured MATLAB executable points to a directory: `{resolved_candidate}`"],
+                True,
+            )
+        if not os.access(resolved_candidate, os.X_OK):
+            return (
+                None,
+                [f"Configured MATLAB executable is not executable: `{resolved_candidate}`"],
+                True,
+            )
+
+        return str(resolved_candidate), [], True
+
     def run_axisfile_wrapper_with_matlab(
         *,
         spk_path: Path,
         wrapper_script: Path,
         loader_dir: Path,
         matlab_bin: str,
+        matlab_env_overrides: dict[str, str],
     ) -> tuple[Path, str, str]:
         spk_path = spk_path.expanduser().resolve()
         wrapper_script = wrapper_script.expanduser().resolve()
@@ -103,9 +193,13 @@ def _():
             "end;"
         )
 
+        subprocess_env = os.environ.copy()
+        subprocess_env.update(matlab_env_overrides)
+
         result = subprocess.run(
             [matlab_bin, "-batch", batch_code],
             capture_output=True,
+            env=subprocess_env,
             text=True,
             check=False,
         )
@@ -191,6 +285,8 @@ def _():
         get_runtime_messages,
         mo,
         octave_loader_is_compatible,
+        parse_env_overrides,
+        resolve_matlab_executable,
         run_axisfile_wrapper_with_matlab,
         run_axisfile_wrapper_with_octave,
         shutil,
@@ -227,6 +323,30 @@ def _(default_spk_path, mo):
 def _(mo):
     selected_runtime, set_selected_runtime = mo.state("matlab")
     return selected_runtime, set_selected_runtime
+
+
+@app.cell
+def _(matlab_bin_on_path, mo):
+    matlab_executable_path_input = mo.ui.text(
+        label="MATLAB executable path override",
+        value="",
+        placeholder=matlab_bin_on_path or "/absolute/path/to/matlab",
+        full_width=True,
+    )
+    matlab_env_overrides_input = mo.ui.text_area(
+        label="MATLAB environment overrides",
+        value="",
+        placeholder="# One KEY=VALUE per line\nLD_LIBRARY_PATH=/opt/matlab/runtime\nMATLAB_HOME=/opt/MATLAB/R2024b",
+        full_width=True,
+    )
+    return matlab_env_overrides_input, matlab_executable_path_input
+
+
+@app.cell
+def _(shutil):
+    matlab_bin_on_path = shutil.which("matlab")
+    octave_bin_on_path = shutil.which("octave")
+    return matlab_bin_on_path, octave_bin_on_path
 
 
 @app.cell
@@ -281,22 +401,34 @@ def _(default_spk_path, spk_path_picker):
 def _(
     get_runtime_messages,
     loader_dir,
+    matlab_bin_on_path,
+    matlab_env_overrides_input,
+    matlab_executable_path_input,
     matlab_runtime_button,
     matlab_wrapper_script,
     mo,
+    octave_bin_on_path,
     octave_loader_is_compatible,
     octave_runtime_button,
     octave_wrapper_script,
     output_csv_path,
+    parse_env_overrides,
+    resolve_matlab_executable,
     selected_runtime_value,
     show_spk_picker,
-    shutil,
     spk_path,
     spk_path_picker,
     spk_path_toggle,
 ):
-    matlab_bin = shutil.which("matlab")
-    octave_bin = shutil.which("octave")
+    matlab_env_overrides, matlab_env_errors = parse_env_overrides(
+        matlab_env_overrides_input.value
+    )
+    matlab_bin, matlab_path_errors, has_matlab_override = resolve_matlab_executable(
+        configured_path=matlab_executable_path_input.value,
+        detected_path=matlab_bin_on_path,
+        env_overrides=matlab_env_overrides,
+    )
+    octave_bin = octave_bin_on_path
     octave_loader_compatible = octave_loader_is_compatible(loader_dir)
     runtime_notes, runtime_blockers = get_runtime_messages(
         runtime=selected_runtime_value,
@@ -304,6 +436,13 @@ def _(
         octave_bin=octave_bin,
         octave_loader_compatible=octave_loader_compatible,
     )
+    config_warnings: list[str] = []
+    for warning in matlab_path_errors + matlab_env_errors + runtime_blockers:
+        if warning not in config_warnings:
+            config_warnings.append(warning)
+    if selected_runtime_value == "matlab":
+        runtime_blockers = config_warnings
+
     active_wrapper_script = (
         matlab_wrapper_script
         if selected_runtime_value == "matlab"
@@ -312,7 +451,31 @@ def _(
 
     status = [
         f"- Selected runtime: `{selected_runtime_value}`",
-        f"- MATLAB binary: `{matlab_bin}`" if matlab_bin else "- MATLAB binary: not found on PATH",
+        (
+            f"- MATLAB binary on PATH: `{matlab_bin_on_path}`"
+            if matlab_bin_on_path
+            else "- MATLAB binary on PATH: not found"
+        ),
+        (
+            f"- MATLAB executable override: `{matlab_executable_path_input.value}`"
+            if matlab_executable_path_input.value.strip()
+            else "- MATLAB executable override: none"
+        ),
+        (
+            f"- Effective MATLAB executable: `{matlab_bin}`"
+            if matlab_bin
+            else "- Effective MATLAB executable: not configured"
+        ),
+        (
+            "- MATLAB executable source: override"
+            if has_matlab_override
+            else "- MATLAB executable source: PATH lookup"
+        ),
+        (
+            f"- MATLAB environment overrides: {len(matlab_env_overrides)} configured"
+            if matlab_env_overrides
+            else "- MATLAB environment overrides: none"
+        ),
         f"- Octave binary: `{octave_bin}`" if octave_bin else "- Octave binary: not found on PATH",
         f"- MATLAB wrapper: `{matlab_wrapper_script}`",
         f"- Octave wrapper: `{octave_wrapper_script}`",
@@ -330,9 +493,17 @@ def _(
     blocks = [mo.md("## Configuration\n" + "\n".join(status))]
     if runtime_notes:
         blocks.append(mo.md("**Notes**\n" + "\n".join(f"- {note}" for note in runtime_notes)))
-    if runtime_blockers:
+    blocks.append(
+        mo.vstack(
+            [
+                matlab_executable_path_input,
+                matlab_env_overrides_input,
+            ]
+        )
+    )
+    if config_warnings:
         blocks.append(
-            mo.md("**Warnings**\n" + "\n".join(f"- {warning}" for warning in runtime_blockers))
+            mo.md("**Warnings**\n" + "\n".join(f"- {warning}" for warning in config_warnings))
         )
 
     controls = [matlab_runtime_button, octave_runtime_button, spk_path_toggle]
@@ -341,7 +512,13 @@ def _(
 
     blocks.append(mo.hstack(controls, align="start"))
     mo.vstack(blocks)
-    return active_wrapper_script, matlab_bin, octave_bin, runtime_blockers
+    return (
+        active_wrapper_script,
+        matlab_bin,
+        matlab_env_overrides,
+        octave_bin,
+        runtime_blockers,
+    )
 
 
 @app.cell
@@ -349,6 +526,7 @@ def _(
     active_wrapper_script,
     loader_dir,
     matlab_bin,
+    matlab_env_overrides,
     mo,
     octave_bin,
     run_axisfile_wrapper_with_matlab,
@@ -369,6 +547,7 @@ def _(
                 wrapper_script=active_wrapper_script,
                 loader_dir=loader_dir,
                 matlab_bin=matlab_bin,
+                matlab_env_overrides=matlab_env_overrides,
             )
         else:
             csv_path, stdout, stderr = run_axisfile_wrapper_with_octave(
@@ -390,6 +569,7 @@ def _(
             message += f"```text\n{stderr}\n```\n"
 
     mo.md(message)
+    return
 
 
 if __name__ == "__main__":
