@@ -17,6 +17,20 @@ def _():
     def quote_for_eval(value: Path | str) -> str:
         return str(value).replace("'", "''")
 
+    def build_runtime_log_path(spk_path: Path, runtime: str) -> Path:
+        return spk_path.with_name(f"{spk_path.stem}_{runtime}.log")
+
+    def read_log_tail(log_path: Path, *, max_lines: int = 200) -> str:
+        if not log_path.is_file():
+            return ""
+
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return ""
+
+        return "\n".join(lines[-max_lines:])
+
     def octave_loader_is_compatible(loader_dir: Path) -> bool:
         spike_dataset_file = loader_dir / "SpikeDataSet.m"
         heterogeneous_shim = loader_dir / "+matlab" / "+mixin" / "Heterogeneous.m"
@@ -165,11 +179,12 @@ def _():
         loader_dir: Path,
         matlab_bin: str,
         matlab_env_overrides: dict[str, str],
-    ) -> tuple[Path, str, str]:
+    ) -> tuple[Path, str, str, Path]:
         spk_path = spk_path.expanduser().resolve()
         wrapper_script = wrapper_script.expanduser().resolve()
         loader_dir = loader_dir.expanduser().resolve()
         csv_path = spk_path.with_suffix(".csv")
+        log_path = build_runtime_log_path(spk_path, "matlab")
 
         if not spk_path.is_file():
             raise FileNotFoundError(f"SPK file not found: {spk_path}")
@@ -196,25 +211,33 @@ def _():
         subprocess_env = os.environ.copy()
         subprocess_env.update(matlab_env_overrides)
 
-        result = subprocess.run(
-            [matlab_bin, "-batch", batch_code],
-            capture_output=True,
-            env=subprocess_env,
-            text=True,
-            check=False,
-        )
+        with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
+            result = subprocess.run(
+                [matlab_bin, "-batch", batch_code],
+                env=subprocess_env,
+                stderr=subprocess.STDOUT,
+                stdout=log_file,
+                text=True,
+                check=False,
+            )
+        log_tail = read_log_tail(log_path)
 
         if result.returncode != 0:
             raise RuntimeError(
                 "MATLAB conversion failed.\n"
-                f"STDOUT:\n{result.stdout}\n"
-                f"STDERR:\n{result.stderr}"
+                f"Log file: {log_path}\n"
+                f"LOG TAIL:\n{log_tail}"
             )
 
         if not csv_path.exists():
-            raise RuntimeError(f"Conversion finished but CSV was not created: {csv_path}")
+            raise RuntimeError(
+                "MATLAB conversion finished but CSV was not created.\n"
+                f"CSV path: {csv_path}\n"
+                f"Log file: {log_path}\n"
+                f"LOG TAIL:\n{log_tail}"
+            )
 
-        return csv_path, result.stdout.strip(), result.stderr.strip()
+        return csv_path, log_tail, "", log_path
 
     def run_axisfile_wrapper_with_octave(
         *,
@@ -222,11 +245,12 @@ def _():
         wrapper_script: Path,
         loader_dir: Path,
         octave_bin: str,
-    ) -> tuple[Path, str, str]:
+    ) -> tuple[Path, str, str, Path]:
         spk_path = spk_path.expanduser().resolve()
         wrapper_script = wrapper_script.expanduser().resolve()
         loader_dir = loader_dir.expanduser().resolve()
         csv_path = spk_path.with_suffix(".csv")
+        log_path = build_runtime_log_path(spk_path, "octave")
 
         if not spk_path.is_file():
             raise FileNotFoundError(f"SPK file not found: {spk_path}")
@@ -253,16 +277,19 @@ def _():
             "end;"
         )
 
-        result = subprocess.run(
-            [octave_bin, "--quiet", "--no-gui", "--no-history", "--eval", eval_code],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
+            result = subprocess.run(
+                [octave_bin, "--quiet", "--no-gui", "--no-history", "--eval", eval_code],
+                stderr=subprocess.STDOUT,
+                stdout=log_file,
+                text=True,
+                check=False,
+            )
+        log_tail = read_log_tail(log_path)
 
         if result.returncode != 0:
             hint = ""
-            error_text = f"{result.stdout}\n{result.stderr}"
+            error_text = log_tail
             if "matlab.mixin" in error_text or "no such method or property 'empty'" in error_text:
                 hint = (
                     "\nHint: AxionFileLoader relies on MATLAB class features not fully supported "
@@ -270,22 +297,29 @@ def _():
                 )
             raise RuntimeError(
                 "Octave conversion failed.\n"
-                f"STDOUT:\n{result.stdout}\n"
-                f"STDERR:\n{result.stderr}"
+                f"Log file: {log_path}\n"
+                f"LOG TAIL:\n{log_tail}"
                 f"{hint}"
             )
 
         if not csv_path.exists():
-            raise RuntimeError(f"Conversion finished but CSV was not created: {csv_path}")
+            raise RuntimeError(
+                "Octave conversion finished but CSV was not created.\n"
+                f"CSV path: {csv_path}\n"
+                f"Log file: {log_path}\n"
+                f"LOG TAIL:\n{log_tail}"
+            )
 
-        return csv_path, result.stdout.strip(), result.stderr.strip()
+        return csv_path, log_tail, "", log_path
 
     return (
         Path,
+        build_runtime_log_path,
         get_runtime_messages,
         mo,
         octave_loader_is_compatible,
         parse_env_overrides,
+        read_log_tail,
         resolve_matlab_executable,
         run_axisfile_wrapper_with_matlab,
         run_axisfile_wrapper_with_octave,
@@ -399,6 +433,7 @@ def _(default_spk_path, spk_path_picker):
 
 @app.cell
 def _(
+    build_runtime_log_path,
     get_runtime_messages,
     loader_dir,
     matlab_bin_on_path,
@@ -448,6 +483,7 @@ def _(
         if selected_runtime_value == "matlab"
         else octave_wrapper_script
     )
+    active_log_path = build_runtime_log_path(spk_path, selected_runtime_value)
 
     status = [
         f"- Selected runtime: `{selected_runtime_value}`",
@@ -480,6 +516,7 @@ def _(
         f"- MATLAB wrapper: `{matlab_wrapper_script}`",
         f"- Octave wrapper: `{octave_wrapper_script}`",
         f"- Active wrapper: `{active_wrapper_script}`",
+        f"- Active log file: `{active_log_path}`",
         f"- Loader directory: `{loader_dir}`",
         (
             "- Octave loader compatibility: detected"
@@ -513,6 +550,7 @@ def _(
     blocks.append(mo.hstack(controls, align="start"))
     mo.vstack(blocks)
     return (
+        active_log_path,
         active_wrapper_script,
         matlab_bin,
         matlab_env_overrides,
@@ -523,12 +561,14 @@ def _(
 
 @app.cell
 def _(
+    active_log_path,
     active_wrapper_script,
     loader_dir,
     matlab_bin,
     matlab_env_overrides,
     mo,
     octave_bin,
+    read_log_tail,
     run_axisfile_wrapper_with_matlab,
     run_axisfile_wrapper_with_octave,
     runtime_blockers,
@@ -541,35 +581,49 @@ def _(
             + "\n".join(f"- {warning}" for warning in runtime_blockers)
         )
     else:
-        if selected_runtime_value == "matlab":
-            csv_path, stdout, stderr = run_axisfile_wrapper_with_matlab(
-                spk_path=spk_path,
-                wrapper_script=active_wrapper_script,
-                loader_dir=loader_dir,
-                matlab_bin=matlab_bin,
-                matlab_env_overrides=matlab_env_overrides,
-            )
-        else:
-            csv_path, stdout, stderr = run_axisfile_wrapper_with_octave(
-                spk_path=spk_path,
-                wrapper_script=active_wrapper_script,
-                loader_dir=loader_dir,
-                octave_bin=octave_bin,
-            )
+        try:
+            if selected_runtime_value == "matlab":
+                csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_matlab(
+                    spk_path=spk_path,
+                    wrapper_script=active_wrapper_script,
+                    loader_dir=loader_dir,
+                    matlab_bin=matlab_bin,
+                    matlab_env_overrides=matlab_env_overrides,
+                )
+            else:
+                csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_octave(
+                    spk_path=spk_path,
+                    wrapper_script=active_wrapper_script,
+                    loader_dir=loader_dir,
+                    octave_bin=octave_bin,
+                )
 
-        message = (
-            "## Conversion Result\n"
-            f"- Runtime: `{selected_runtime_value}`\n"
-            f"- CSV created at: `{csv_path}`\n"
-        )
+            message = (
+                "## Conversion Result\n"
+                f"- Runtime: `{selected_runtime_value}`\n"
+                f"- CSV created at: `{csv_path}`\n"
+                f"- Log file: `{log_path}`\n"
+            )
+            if stdout:
+                message += f"```text\n{stdout}\n```\n"
+            if stderr:
+                message += f"```text\n{stderr}\n```\n"
+        except Exception as exc:
+            log_tail = read_log_tail(active_log_path)
+            message = (
+                "## Conversion Result\n"
+                f"- Runtime: `{selected_runtime_value}`\n"
+                "- Status: failed\n"
+                f"- Log file: `{active_log_path}`\n"
+                f"```text\n{exc}\n```\n"
+            )
+            if log_tail:
+                message += f"### Log Tail\n```text\n{log_tail}\n```\n"
 
-        if stdout:
-            message += f"```text\n{stdout}\n```\n"
-        if stderr:
-            message += f"```text\n{stderr}\n```\n"
+    if runtime_blockers:
+        message += f"\n- Expected log file: `{active_log_path}`\n"
 
     mo.md(message)
-    return
 
 
 if __name__ == "__main__":
