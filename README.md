@@ -2,9 +2,13 @@
 
 ## Prerequisites
 
-- MATLAB for using the [AxionFileLoader](https://github.com/axionbio/AxionFileLoader) Matlab loader.
+- MATLAB for the default Axion `.spk` processing path, using the vendored
+  [AxionFileLoader](https://github.com/axionbio/AxionFileLoader) MATLAB loader.
 
-  Or in testing/development: [GNU Octave](https://octave.org/) with modified AxionFileLoader.
+- Optional developer-only support for [GNU Octave](https://octave.org/).
+  This is experimental and requires switching
+  `mea-rasterplotter/vendor/AxionFileLoader` to the `feature/octave` branch
+  before using the Octave notebook path.
 - [UV](https://docs.astral.sh/uv/) Python package manager.
 
 ## Installation

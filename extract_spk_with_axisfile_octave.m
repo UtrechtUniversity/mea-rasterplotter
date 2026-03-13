@@ -20,7 +20,7 @@ function extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir)
 
     if nargin < 3 || isempty(loader_dir)
         this_dir = fileparts(mfilename('fullpath'));
-        loader_dir = fullfile(this_dir, '..', 'vendor', 'AxionFileLoader', 'AxionFileLoader');
+        loader_dir = fullfile(this_dir, 'vendor', 'AxionFileLoader', 'AxionFileLoader');
     end
 
     if exist(spk_path, 'file') ~= 2
