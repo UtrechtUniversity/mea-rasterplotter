@@ -230,17 +230,35 @@ def _(Path):
 
 
 @app.cell
-def _(default_spike_csv, default_well_annotations_csv, mo):
+def _(default_spike_csv, mo):
+    show_spike_picker, set_show_spike_picker = mo.state(
+        not default_spike_csv.is_file()
+    )
+    return set_show_spike_picker, show_spike_picker
+
+
+@app.cell(hide_code=True)
+def _(
+    default_spike_csv,
+    default_well_annotations_csv,
+    mo,
+    set_show_spike_picker,
+):
+    spike_csv_toggle = mo.ui.button(
+        label="Choose/change spike CSV",
+        on_click=lambda _: set_show_spike_picker(lambda current: not current),
+    )
     spike_csv_path = mo.ui.file_browser(
         initial_path=default_spike_csv.parent,
         filetypes=[".csv"],
         multiple=False,
         label="Spike CSV file",
+        on_change=lambda _: set_show_spike_picker(False),
     )
     well_annotations_path = mo.ui.text(
         label="Well annotation CSV path", value=str(default_well_annotations_csv)
     )
-    return spike_csv_path, well_annotations_path
+    return spike_csv_path, spike_csv_toggle, well_annotations_path
 
 
 @app.cell
@@ -395,6 +413,7 @@ def _(mo):
 
 @app.cell
 def _(
+    default_spike_csv,
     end_time,
     fig,
     figure_height,
@@ -404,17 +423,25 @@ def _(
     mo,
     selected_well,
     show_channel_labels,
+    show_spike_picker,
     spike_color,
     spike_csv_path,
+    spike_csv_toggle,
     start_time,
     well_annotations_path,
     x_pad_left,
     x_pad_right,
 ):
-    controls = mo.vstack(
+    selected_spike_csv = spike_csv_path.path(0) or default_spike_csv
+    input_widgets = [
+        mo.md("### Inputs"),
+        mo.md(f"Selected spike CSV: `{selected_spike_csv}`"),
+        spike_csv_toggle,
+    ]
+    if show_spike_picker():
+        input_widgets.append(spike_csv_path)
+    input_widgets.extend(
         [
-            mo.md("### Inputs"),
-            spike_csv_path,
             well_annotations_path,
             selected_well,
             mo.md("### Plot Window"),
@@ -429,7 +456,10 @@ def _(
             x_pad_right,
             spike_color,
             show_channel_labels,
-        ],
+        ]
+    )
+    controls = mo.vstack(
+        input_widgets,
         align="stretch",
         gap=0.3,
     )
