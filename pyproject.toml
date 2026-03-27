@@ -13,3 +13,8 @@ dependencies = [
     "numpy>=2.4.2",
     "polars>=1.38.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pydantic-ai>=1.73.0",
+]
