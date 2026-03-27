@@ -262,31 +262,63 @@ def _(
 
 
 @app.cell
-def _(default_spike_csv, mo, spike_csv_path):
-    selected_spike_csv = spike_csv_path.path(0)
-    spike_csv = selected_spike_csv or (default_spike_csv if default_spike_csv.is_file() else "")
-    mo.stop(
-        not spike_csv,
-        mo.md("Select a spike CSV to continue.").callout(kind="warn"),
+def _(
+    default_spike_csv,
+    mo,
+    show_spike_picker,
+    spike_csv_path,
+    spike_csv_toggle,
+    well_annotations_path,
+):
+    displayed_spike_csv = spike_csv_path.path(0) or (
+        default_spike_csv if default_spike_csv.is_file() else ""
     )
-    return (spike_csv,)
+    input_widgets = [
+        mo.md("### Inputs"),
+        mo.md(f"Selected spike CSV: `{displayed_spike_csv}`"),
+        spike_csv_toggle,
+    ]
+    if show_spike_picker():
+        input_widgets.append(spike_csv_path)
+    if not displayed_spike_csv:
+        input_widgets.append(
+            mo.md("Select a spike CSV to continue.").callout(kind="warn")
+        )
+    input_widgets.append(well_annotations_path)
+    mo.vstack(input_widgets, align="stretch", gap=0.3)
+    return
+
+
+@app.cell
+def _(Path, default_spike_csv, mo, spike_csv_path):
+    selected_spike_csv_path = spike_csv_path.path(0)
+    resolved_spike_csv = (
+        Path(selected_spike_csv_path)
+        if selected_spike_csv_path
+        else (default_spike_csv if default_spike_csv.is_file() else None)
+    )
+    mo.stop(resolved_spike_csv is None)
+    return (resolved_spike_csv,)
 
 
 @app.cell
 def _(
     load_spike_csv,
     load_well_annotations,
+    mo,
     normalize_and_map_wells,
     repo_root,
     resolve_input_path,
-    spike_csv,
+    resolved_spike_csv,
     well_annotations_path,
 ):
+    mo.stop(resolved_spike_csv is None)
     annotation_csv = resolve_input_path(well_annotations_path.value, repo_root)
-    spikes = load_spike_csv(spike_csv)
+    spikes = load_spike_csv(resolved_spike_csv)
     annotations = load_well_annotations(annotation_csv)
     rasterplot_data = normalize_and_map_wells(spikes, annotations)
-    return annotation_csv, rasterplot_data
+    spike_csv = resolved_spike_csv
+    return annotation_csv, rasterplot_data, spike_csv
 
 
 @app.cell
@@ -423,7 +455,6 @@ def _(mo):
 
 @app.cell
 def _(
-    default_spike_csv,
     end_time,
     fig,
     figure_height,
@@ -433,43 +464,27 @@ def _(
     mo,
     selected_well,
     show_channel_labels,
-    show_spike_picker,
     spike_color,
-    spike_csv_path,
-    spike_csv_toggle,
     start_time,
-    well_annotations_path,
     x_pad_left,
     x_pad_right,
 ):
-    selected_spike_csv = spike_csv_path.path(0) or (
-        default_spike_csv if default_spike_csv.is_file() else ""
-    )
     input_widgets = [
-        mo.md("### Inputs"),
-        mo.md(f"Selected spike CSV: `{selected_spike_csv}`"),
-        spike_csv_toggle,
+        mo.md("### Plot Controls"),
+        selected_well,
+        mo.md("### Plot Window"),
+        start_time,
+        end_time,
+        mo.md("### Plot Settings"),
+        figure_width,
+        figure_height,
+        line_length,
+        line_width,
+        x_pad_left,
+        x_pad_right,
+        spike_color,
+        show_channel_labels,
     ]
-    if show_spike_picker():
-        input_widgets.append(spike_csv_path)
-    input_widgets.extend(
-        [
-            well_annotations_path,
-            selected_well,
-            mo.md("### Plot Window"),
-            start_time,
-            end_time,
-            mo.md("### Plot Settings"),
-            figure_width,
-            figure_height,
-            line_length,
-            line_width,
-            x_pad_left,
-            x_pad_right,
-            spike_color,
-            show_channel_labels,
-        ]
-    )
     controls = mo.vstack(
         input_widgets,
         align="stretch",
@@ -500,12 +515,12 @@ def _(
     wells,
 ):
     selected_well_label = well_label or "None"
-    selected_spike_csv = spike_csv or ""
+    summary_spike_csv = spike_csv or ""
     mo.md(
         "\n".join(
             [
                 "### Data Summary",
-                f"- Spike CSV: `{selected_spike_csv}`",
+                f"- Spike CSV: `{summary_spike_csv}`",
                 f"- Well annotations CSV: `{annotation_csv}`",
                 f"- Available wells in data: `{len(wells)}`",
                 f"- Selected well: `{selected_well_label}`",
