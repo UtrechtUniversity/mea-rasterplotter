@@ -14,7 +14,7 @@ dependencies = [
     "polars>=1.38.1",
 ]
 
-[dependency-groups]
-dev = [
+[project.optional-dependencies]
+marimo-ai = [
     "pydantic-ai>=1.73.0",
 ]
