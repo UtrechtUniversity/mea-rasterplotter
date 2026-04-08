@@ -79,26 +79,24 @@ function extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir)
         end
     end
 
-    final_results = [];
+    final_results = struct();
     if ~isempty(spike_rows.WaveformStartTime)
         spike_rows = sort_spike_rows_for_csv(spike_rows);
 
         electrode_digits = floor(log10(spike_rows.ElectrodeRow)) + 1;
-        well_digits = floor(log10(spike_rows.WellColumn)) + 1;
-
         channel_label = spike_rows.ElectrodeColumn .* (10 .^ electrode_digits) + spike_rows.ElectrodeRow;
-        well_label = spike_rows.WellRow .* (10 .^ well_digits) + spike_rows.WellColumn;
+        well_label = arrayfun(@well_label_from_indices, ...
+            spike_rows.WellRow(:), ...
+            spike_rows.WellColumn(:), ...
+            'UniformOutput', false);
 
         % Keep the CSV headers aligned with the example: use "timestamp"
-        timestamp = spike_rows.WaveformStartTime;
-        final_results = [ ...
-            channel_label(:), ...
-            well_label(:), ...
-            timestamp(:), ...
-            spike_rows.MaximumAmplitude(:), ...
-            spike_rows.MinimumAmplitude(:), ...
-            spike_rows.PeakToPeakAmplitude(:) ...
-        ];
+        final_results.Channel_Label = channel_label(:);
+        final_results.Well_Label = well_label(:);
+        final_results.Timestamp = spike_rows.WaveformStartTime(:);
+        final_results.Maximum_Amplitude = spike_rows.MaximumAmplitude(:);
+        final_results.Minimum_Amplitude = spike_rows.MinimumAmplitude(:);
+        final_results.Peak_to_peak_Amplitude = spike_rows.PeakToPeakAmplitude(:);
     end
 
     fid = fopen(output_csv, 'w');
@@ -113,11 +111,19 @@ function extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir)
         'Maximum_Amplitude', ...
         'Minimum_Amplitude', ...
         'Peak_to_peak_Amplitude');
-    fclose(fid);
 
-    if ~isempty(final_results)
-        dlmwrite(output_csv, final_results, '-append', 'delimiter', ',', 'precision', 17);
+    if isfield(final_results, 'Timestamp')
+        for row_idx = 1:numel(final_results.Timestamp)
+            fprintf(fid, '%d,%s,%.17g,%.17g,%.17g,%.17g\n', ...
+                final_results.Channel_Label(row_idx), ...
+                final_results.Well_Label{row_idx}, ...
+                final_results.Timestamp(row_idx), ...
+                final_results.Maximum_Amplitude(row_idx), ...
+                final_results.Minimum_Amplitude(row_idx), ...
+                final_results.Peak_to_peak_Amplitude(row_idx));
+        end
     end
+    fclose(fid);
 
     fprintf('Wrote CSV: %s\n', output_csv);
 end
@@ -152,4 +158,8 @@ function sorted_rows = sort_spike_rows_for_csv(spike_rows)
         field_name = field_names{field_idx};
         sorted_rows.(field_name) = spike_rows.(field_name)(sort_idx);
     end
+end
+
+function label = well_label_from_indices(well_row, well_column)
+    label = sprintf('%s%d', char(double('A') + well_row - 1), well_column);
 end
