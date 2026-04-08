@@ -30,8 +30,6 @@ def _():
         "Minimum_Amplitude",
         "Peak_to_peak_Amplitude",
     }
-    WELL_REQUIRED_COLUMNS = {"Well_Label", "Well_Label_num"}
-
     @dataclass
     class PlotSettings:
         start_time: float
@@ -44,12 +42,6 @@ def _():
         x_pad_left: float
         x_pad_right: float
         show_channel_labels: bool
-
-    def resolve_input_path(path_value: str, base_dir: Path) -> Path:
-        candidate = Path(path_value.strip()).expanduser()
-        if not candidate.is_absolute():
-            candidate = (base_dir / candidate).resolve()
-        return candidate
 
     def assert_required_columns(
         df: pl.DataFrame, required: set[str], dataset_name: str
@@ -65,41 +57,10 @@ def _():
             raise FileNotFoundError(f"Spike CSV not found: {path}")
         spikes = pl.read_csv(path)
         assert_required_columns(spikes, SPIKE_REQUIRED_COLUMNS, "Spike CSV")
-        return spikes
-
-    def load_well_annotations(path: Path) -> pl.DataFrame:
-        if not path.is_file():
-            raise FileNotFoundError(f"Well annotation CSV not found: {path}")
-        well_annotations = pl.read_csv(path)
-        assert_required_columns(
-            well_annotations, WELL_REQUIRED_COLUMNS, "Well annotation CSV"
-        )
-        return well_annotations
-
-    def normalize_and_map_wells(spikes: pl.DataFrame, wells: pl.DataFrame) -> pl.DataFrame:
-        spikes_normalized = spikes.with_columns(
-            pl.col("Well_Label").cast(pl.Float64, strict=False).alias("Well_Label_numeric"),
+        return spikes.with_columns(
+            pl.col("Well_Label").cast(pl.Utf8, strict=False).alias("Well_Label"),
             pl.col("Timestamp").cast(pl.Float64, strict=False).alias("Timestamp"),
             pl.col("Channel_Label").cast(pl.Utf8).alias("Channel_Label"),
-        )
-
-        wells_normalized = wells.with_columns(
-            pl.col("Well_Label_num")
-            .cast(pl.Float64, strict=False)
-            .alias("Well_Label_num_numeric"),
-            pl.col("Well_Label").cast(pl.Utf8).alias("Mapped_Well_Label"),
-        )
-
-        joined = spikes_normalized.join(
-            wells_normalized.select(["Well_Label_num_numeric", "Mapped_Well_Label"]),
-            left_on="Well_Label_numeric",
-            right_on="Well_Label_num_numeric",
-            how="left",
-        )
-
-        # Replace numeric well IDs with mapped names
-        return joined.with_columns(pl.col("Mapped_Well_Label").alias("Well_Label")).drop(
-            "Mapped_Well_Label"
         )
 
     def available_wells(df: pl.DataFrame) -> list[str]:
@@ -203,30 +164,22 @@ def _():
         build_event_series,
         filter_well_window,
         load_spike_csv,
-        load_well_annotations,
         mo,
-        normalize_and_map_wells,
         np,
         pl,
         render_raster,
-        resolve_input_path,
     )
 
 
 @app.cell
 def _(Path):
     notebook_dir = Path(__file__).resolve().parent
-    repo_root = notebook_dir.parent
     default_spike_csv = (
-        repo_root
+        notebook_dir.parent
         / "data"
         / "201023_LvM_256086_1268-20_MEA_rCortex_Permethrin_baseline_female_DIV11(000)_Spike Detector (7 x STD)(000).csv"
     )
-    # This is based on the Matlab numeric indexes, can we transform this to labels earlier in the pipeline?
-    default_well_annotations_csv = (
-        repo_root / "example" / "Well_annotations" / "Well_annotations_axion.csv"
-    )
-    return default_spike_csv, default_well_annotations_csv, repo_root
+    return (default_spike_csv,)
 
 
 @app.cell
@@ -238,12 +191,7 @@ def _(default_spike_csv, mo):
 
 
 @app.cell
-def _(
-    default_spike_csv,
-    default_well_annotations_csv,
-    mo,
-    set_show_spike_picker,
-):
+def _(default_spike_csv, mo, set_show_spike_picker):
     spike_csv_toggle = mo.ui.button(
         label="Choose/change spike CSV",
         on_click=lambda _: set_show_spike_picker(lambda current: not current),
@@ -255,10 +203,7 @@ def _(
         label="Spike CSV file",
         on_change=lambda _: set_show_spike_picker(False),
     )
-    well_annotations_path = mo.ui.text(
-        label="Well annotation CSV path", value=str(default_well_annotations_csv)
-    )
-    return spike_csv_path, spike_csv_toggle, well_annotations_path
+    return spike_csv_path, spike_csv_toggle
 
 
 @app.cell
@@ -268,7 +213,6 @@ def _(
     show_spike_picker,
     spike_csv_path,
     spike_csv_toggle,
-    well_annotations_path,
 ):
     displayed_spike_csv = spike_csv_path.path(0) or (
         default_spike_csv if default_spike_csv.is_file() else ""
@@ -284,7 +228,6 @@ def _(
         input_widgets.append(
             mo.md("Select a spike CSV to continue.").callout(kind="warn")
         )
-    input_widgets.append(well_annotations_path)
     mo.vstack(input_widgets, align="stretch", gap=0.3)
     return
 
@@ -302,23 +245,11 @@ def _(Path, default_spike_csv, mo, spike_csv_path):
 
 
 @app.cell
-def _(
-    load_spike_csv,
-    load_well_annotations,
-    mo,
-    normalize_and_map_wells,
-    repo_root,
-    resolve_input_path,
-    resolved_spike_csv,
-    well_annotations_path,
-):
+def _(load_spike_csv, mo, resolved_spike_csv):
     mo.stop(resolved_spike_csv is None)
-    annotation_csv = resolve_input_path(well_annotations_path.value, repo_root)
-    spikes = load_spike_csv(resolved_spike_csv)
-    annotations = load_well_annotations(annotation_csv)
-    rasterplot_data = normalize_and_map_wells(spikes, annotations)
+    rasterplot_data = load_spike_csv(resolved_spike_csv)
     spike_csv = resolved_spike_csv
-    return annotation_csv, rasterplot_data, spike_csv
+    return rasterplot_data, spike_csv
 
 
 @app.cell
@@ -505,15 +436,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    annotation_csv,
-    channel_labels,
-    mo,
-    spike_csv,
-    well_data,
-    well_label,
-    wells,
-):
+def _(channel_labels, mo, spike_csv, well_data, well_label, wells):
     selected_well_label = well_label or "None"
     summary_spike_csv = spike_csv or ""
     mo.md(
@@ -521,7 +444,6 @@ def _(
             [
                 "### Data Summary",
                 f"- Spike CSV: `{summary_spike_csv}`",
-                f"- Well annotations CSV: `{annotation_csv}`",
                 f"- Available wells in data: `{len(wells)}`",
                 f"- Selected well: `{selected_well_label}`",
                 f"- Spikes in current view: `{well_data.height}`",
@@ -529,11 +451,6 @@ def _(
             ]
         )
     )
-    return
-
-
-@app.cell
-def _():
     return
 
 
