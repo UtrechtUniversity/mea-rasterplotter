@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.22.5"
 app = marimo.App(width="full")
 
 
@@ -237,7 +237,7 @@ def _(default_spike_csv, mo):
     return set_show_spike_picker, show_spike_picker
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
     default_spike_csv,
     default_well_annotations_csv,
@@ -469,7 +469,7 @@ def _(
     x_pad_left,
     x_pad_right,
 ):
-    input_widgets = [
+    plot_control_widgets = [
         mo.md("### Plot Controls"),
         selected_well,
         mo.md("### Plot Window"),
@@ -486,7 +486,7 @@ def _(
         show_channel_labels,
     ]
     controls = mo.vstack(
-        input_widgets,
+        plot_control_widgets,
         align="stretch",
         gap=0.3,
     )
