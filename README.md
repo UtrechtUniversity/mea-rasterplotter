@@ -50,6 +50,7 @@ uv sync
 Alternatively, use pip (included with Python):
 
 ```sh
+# Example for Windows:
 # Install and activate an environment
 py -m venv .venv
 .venv\Scripts\activate
@@ -66,6 +67,10 @@ The functionality can be used via two notebooks:
 Open Marimo from an activated venv:
 
 ```sh
+# Use `marimo run` to run a notebook as an app, hiding the code cells:
+marimo run process_spk.py
+marimo run rasterplot.py
+# Use `marimo edit` to open marimo in edit mode
 marimo edit
 ```
 
