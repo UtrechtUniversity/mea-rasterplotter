@@ -335,9 +335,7 @@ def _(Path):
     octave_wrapper_script = notebook_dir / "extract_spk_with_axisfile_octave.m"
     loader_dir = notebook_dir / "vendor" / "AxionFileLoader" / "AxionFileLoader"
     default_spk_path = (
-        notebook_dir.parent
-        / "data"
-        / "201023_LvM_256086_1268-20_MEA_rCortex_Permethrin_baseline_female_DIV11(000)_Spike Detector (7 x STD)(000).spk"
+        notebook_dir
     )
     return (
         default_spk_path,
