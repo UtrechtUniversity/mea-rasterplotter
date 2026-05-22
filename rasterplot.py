@@ -26,9 +26,6 @@ def _():
         "Channel_Label",
         "Well_Label",
         "Timestamp",
-        "Maximum_Amplitude",
-        "Minimum_Amplitude",
-        "Peak_to_peak_Amplitude",
     }
     @dataclass
     class PlotSettings:
