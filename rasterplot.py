@@ -78,6 +78,20 @@ def _():
                     seen.add(well_label)
         return wells
 
+    def channels_for_well(df: pl.DataFrame, well_label: str) -> list[str]:
+        return (
+            df.filter(
+                (pl.col("Well_Label") == well_label)
+                & pl.col("Channel_Label").is_not_null()
+            )
+            .select("Channel_Label")
+            .to_series()
+            .to_list()
+        )
+
+    def sorted_channel_union(*channel_lists: list[str]) -> list[str]:
+        return sorted({str(channel) for channel_list in channel_lists for channel in channel_list})
+
     def timestamp_slider_bounds(df: pl.DataFrame) -> tuple[float, float]:
         timestamp_bounds = df.select(
             pl.col("Timestamp").min().alias("min_ts"),
@@ -106,14 +120,10 @@ def _():
             & (pl.col("Timestamp") <= window_end)
         )
 
-    def build_event_series(df: pl.DataFrame) -> tuple[list[np.ndarray], list[str]]:
-        channel_order = (
-            df.select(pl.col("Channel_Label").unique(maintain_order=True))
-            .to_series()
-            .to_list()
-        )
+    def build_event_series(
+        df: pl.DataFrame, channel_order: list[str]
+    ) -> list[np.ndarray]:
         events: list[np.ndarray] = []
-        channel_labels: list[str] = []
 
         for channel in channel_order:
             timestamps = (
@@ -123,12 +133,9 @@ def _():
                 .drop_nulls()
                 .to_numpy()
             )
-            if timestamps.size == 0:
-                continue
             events.append(np.asarray(timestamps, dtype=float))
-            channel_labels.append(str(channel))
 
-        return events, channel_labels
+        return events
 
     def render_raster(
         events: list[np.ndarray],
@@ -187,11 +194,13 @@ def _():
         PlotSettings,
         available_wells,
         build_event_series,
+        channels_for_well,
         combine_available_wells,
         filter_well_window,
         load_spike_csv,
         mo,
         render_raster,
+        sorted_channel_union,
         timestamp_slider_bounds,
     )
 
@@ -436,36 +445,38 @@ def _(
 
 @app.cell
 def _(
+    baseline_data,
     baseline_plot_settings,
     baseline_well_data,
     build_event_series,
+    channels_for_well,
+    exposure_data,
     exposure_plot_settings,
     exposure_well_data,
     render_raster,
+    sorted_channel_union,
     well_label,
 ):
-    baseline_events, baseline_channel_labels = build_event_series(baseline_well_data)
-    exposure_events, exposure_channel_labels = build_event_series(exposure_well_data)
+    baseline_channels = channels_for_well(baseline_data, well_label)
+    exposure_channels = channels_for_well(exposure_data, well_label)
+    channel_labels = sorted_channel_union(baseline_channels, exposure_channels)
+    baseline_events = build_event_series(baseline_well_data, channel_labels)
+    exposure_events = build_event_series(exposure_well_data, channel_labels)
     baseline_fig = render_raster(
         baseline_events,
-        baseline_channel_labels,
+        channel_labels,
         well_label,
         baseline_plot_settings,
         title=f"Baseline Raster Plot for Well {well_label}",
     )
     exposure_fig = render_raster(
         exposure_events,
-        exposure_channel_labels,
+        channel_labels,
         well_label,
         exposure_plot_settings,
         title=f"Exposure Raster Plot for Well {well_label}",
     )
-    return (
-        baseline_channel_labels,
-        baseline_fig,
-        exposure_channel_labels,
-        exposure_fig,
-    )
+    return baseline_fig, channel_labels, exposure_fig
 
 
 @app.cell(hide_code=True)
@@ -557,10 +568,9 @@ def _(mo):
 
 @app.cell
 def _(
-    baseline_channel_labels,
     baseline_csv,
     baseline_well_data,
-    exposure_channel_labels,
+    channel_labels,
     exposure_csv,
     exposure_well_data,
     mo,
@@ -579,9 +589,8 @@ def _(
                 f"- Available wells across both files: `{len(wells)}`",
                 f"- Selected well: `{selected_well_label}`",
                 f"- Baseline spikes in current view: `{baseline_well_data.height}`",
-                f"- Baseline channels in current view: `{len(baseline_channel_labels)}`",
                 f"- Exposure spikes in current view: `{exposure_well_data.height}`",
-                f"- Exposure channels in current view: `{len(exposure_channel_labels)}`",
+                f"- Shared channels shown: `{len(channel_labels)}`",
             ]
         )
     )
