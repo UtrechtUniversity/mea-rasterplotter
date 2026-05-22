@@ -68,15 +68,15 @@ def _():
         )
 
     def combine_available_wells(*well_lists: list[str]) -> list[str]:
-        wells: list[str] = []
+        well_labels: list[str] = []
         seen: set[str] = set()
         for well_list in well_lists:
             for well in well_list:
                 well_label = str(well)
                 if well_label not in seen:
-                    wells.append(well_label)
+                    well_labels.append(well_label)
                     seen.add(well_label)
-        return wells
+        return well_labels
 
     def channels_for_well(df: pl.DataFrame, well_label: str) -> list[str]:
         return (
@@ -137,7 +137,33 @@ def _():
 
         return events
 
-    def render_raster(
+    def filter_well_for_plot(
+        df: pl.DataFrame, well_label: str, settings: PlotSettings
+    ) -> pl.DataFrame:
+        return filter_well_window(
+            df,
+            well_label,
+            settings.start_time,
+            settings.end_time,
+        )
+
+    def make_spike_raster_figure(
+        dataset_label: str,
+        well_spikes: pl.DataFrame,
+        channel_labels: list[str],
+        well_label: str,
+        settings: PlotSettings,
+    ) -> Figure:
+        events = build_event_series(well_spikes, channel_labels)
+        return make_eventplot_figure(
+            events,
+            channel_labels,
+            well_label,
+            settings,
+            title=f"{dataset_label} Raster Plot for Well {well_label}",
+        )
+
+    def make_eventplot_figure(
         events: list[np.ndarray],
         channel_labels: list[str],
         well_label: str,
@@ -193,13 +219,12 @@ def _():
         Path,
         PlotSettings,
         available_wells,
-        build_event_series,
         channels_for_well,
         combine_available_wells,
-        filter_well_window,
+        filter_well_for_plot,
         load_spike_csv,
+        make_spike_raster_figure,
         mo,
-        render_raster,
         sorted_channel_union,
         timestamp_slider_bounds,
     )
@@ -224,33 +249,33 @@ def _(initial_csv_dir, mo, set_show_csv_pickers):
         label="Choose/change CSV files",
         on_click=lambda _: set_show_csv_pickers(lambda current: not current),
     )
-    baseline_csv_path = mo.ui.file_browser(
+    baseline_csv_picker = mo.ui.file_browser(
         initial_path=initial_csv_dir,
         filetypes=[".csv"],
         multiple=False,
         label="Baseline CSV file",
         on_change=lambda _: set_show_csv_pickers(False),
     )
-    exposure_csv_path = mo.ui.file_browser(
+    exposure_csv_picker = mo.ui.file_browser(
         initial_path=initial_csv_dir,
         filetypes=[".csv"],
         multiple=False,
         label="Exposure CSV file",
         on_change=lambda _: set_show_csv_pickers(False),
     )
-    return baseline_csv_path, csv_picker_toggle, exposure_csv_path
+    return baseline_csv_picker, csv_picker_toggle, exposure_csv_picker
 
 
 @app.cell
 def _(
-    baseline_csv_path,
+    baseline_csv_picker,
     csv_picker_toggle,
-    exposure_csv_path,
+    exposure_csv_picker,
     mo,
     show_csv_pickers,
 ):
-    displayed_baseline_csv = baseline_csv_path.path(0) or ""
-    displayed_exposure_csv = exposure_csv_path.path(0) or ""
+    displayed_baseline_csv = baseline_csv_picker.path(0) or ""
+    displayed_exposure_csv = exposure_csv_picker.path(0) or ""
     input_widgets = [
         mo.md("### Inputs"),
         mo.md(f"Baseline CSV: `{displayed_baseline_csv or 'None selected'}`"),
@@ -258,7 +283,7 @@ def _(
         csv_picker_toggle,
     ]
     if show_csv_pickers() or not (displayed_baseline_csv and displayed_exposure_csv):
-        input_widgets.extend([baseline_csv_path, exposure_csv_path])
+        input_widgets.extend([baseline_csv_picker, exposure_csv_picker])
     if not displayed_baseline_csv or not displayed_exposure_csv:
         input_widgets.append(
             mo.md("Select both a baseline CSV and an exposure CSV to continue.").callout(kind="warn")
@@ -268,11 +293,11 @@ def _(
 
 
 @app.cell
-def _(Path, baseline_csv_path, exposure_csv_path, mo):
-    selected_baseline_csv_path = baseline_csv_path.path(0)
-    selected_exposure_csv_path = exposure_csv_path.path(0)
-    resolved_baseline_csv = Path(selected_baseline_csv_path) if selected_baseline_csv_path else None
-    resolved_exposure_csv = Path(selected_exposure_csv_path) if selected_exposure_csv_path else None
+def _(Path, baseline_csv_picker, exposure_csv_picker, mo):
+    selected_baseline_csv = baseline_csv_picker.path(0)
+    selected_exposure_csv = exposure_csv_picker.path(0)
+    resolved_baseline_csv = Path(selected_baseline_csv) if selected_baseline_csv else None
+    resolved_exposure_csv = Path(selected_exposure_csv) if selected_exposure_csv else None
     mo.stop(resolved_baseline_csv is None or resolved_exposure_csv is None)
     return resolved_baseline_csv, resolved_exposure_csv
 
@@ -291,8 +316,8 @@ def _(load_spike_csv, mo, resolved_baseline_csv, resolved_exposure_csv):
 def _(available_wells, baseline_data, combine_available_wells, exposure_data):
     baseline_wells = available_wells(baseline_data)
     exposure_wells = available_wells(exposure_data)
-    wells = combine_available_wells(baseline_wells, exposure_wells)
-    return (wells,)
+    well_labels = combine_available_wells(baseline_wells, exposure_wells)
+    return (well_labels,)
 
 
 @app.cell
@@ -313,12 +338,12 @@ def _(
     baseline_slider_stop,
     exposure_slider_start,
     exposure_slider_stop,
+    well_labels,
     mo,
-    wells,
 ):
-    selected_well_value = wells[0] if wells else None
+    selected_well_value = well_labels[0] if well_labels else None
     selected_well = mo.ui.dropdown(
-        options=wells,
+        options=well_labels,
         value=selected_well_value,
         label="Selected well",
     )
@@ -436,21 +461,19 @@ def _(
     baseline_plot_settings,
     exposure_data,
     exposure_plot_settings,
-    filter_well_window,
+    filter_well_for_plot,
     selected_well,
 ):
     well_label = "" if selected_well.value is None else str(selected_well.value).strip()
-    baseline_well_data = filter_well_window(
+    baseline_well_data = filter_well_for_plot(
         baseline_data,
         well_label,
-        baseline_plot_settings.start_time,
-        baseline_plot_settings.end_time,
+        baseline_plot_settings,
     )
-    exposure_well_data = filter_well_window(
+    exposure_well_data = filter_well_for_plot(
         exposure_data,
         well_label,
-        exposure_plot_settings.start_time,
-        exposure_plot_settings.end_time,
+        exposure_plot_settings,
     )
     return baseline_well_data, exposure_well_data, well_label
 
@@ -460,35 +483,34 @@ def _(
     baseline_data,
     baseline_plot_settings,
     baseline_well_data,
-    build_event_series,
     channels_for_well,
     exposure_data,
     exposure_plot_settings,
     exposure_well_data,
-    render_raster,
+    make_spike_raster_figure,
     sorted_channel_union,
     well_label,
 ):
-    baseline_channels = channels_for_well(baseline_data, well_label)
-    exposure_channels = channels_for_well(exposure_data, well_label)
-    channel_labels = sorted_channel_union(baseline_channels, exposure_channels)
-    baseline_events = build_event_series(baseline_well_data, channel_labels)
-    exposure_events = build_event_series(exposure_well_data, channel_labels)
-    baseline_fig = render_raster(
-        baseline_events,
-        channel_labels,
+    baseline_channel_labels = channels_for_well(baseline_data, well_label)
+    exposure_channel_labels = channels_for_well(exposure_data, well_label)
+    shared_channel_labels = sorted_channel_union(
+        baseline_channel_labels, exposure_channel_labels
+    )
+    baseline_fig = make_spike_raster_figure(
+        "Baseline",
+        baseline_well_data,
+        shared_channel_labels,
         well_label,
         baseline_plot_settings,
-        title=f"Baseline Raster Plot for Well {well_label}",
     )
-    exposure_fig = render_raster(
-        exposure_events,
-        channel_labels,
+    exposure_fig = make_spike_raster_figure(
+        "Exposure",
+        exposure_well_data,
+        shared_channel_labels,
         well_label,
         exposure_plot_settings,
-        title=f"Exposure Raster Plot for Well {well_label}",
     )
-    return baseline_fig, channel_labels, exposure_fig
+    return baseline_fig, shared_channel_labels, exposure_fig
 
 
 @app.cell(hide_code=True)
@@ -582,27 +604,25 @@ def _(mo):
 def _(
     baseline_csv,
     baseline_well_data,
-    channel_labels,
     exposure_csv,
     exposure_well_data,
     mo,
+    shared_channel_labels,
     well_label,
-    wells,
+    well_labels,
 ):
     selected_well_label = well_label or "None"
-    summary_baseline_csv = baseline_csv or ""
-    summary_exposure_csv = exposure_csv or ""
     mo.md(
         "\n".join(
             [
                 "### Data Summary",
-                f"- Baseline CSV: `{summary_baseline_csv}`",
-                f"- Exposure CSV: `{summary_exposure_csv}`",
-                f"- Available wells across both files: `{len(wells)}`",
+                f"- Baseline CSV: `{baseline_csv}`",
+                f"- Exposure CSV: `{exposure_csv}`",
+                f"- Available wells across both files: `{len(well_labels)}`",
                 f"- Selected well: `{selected_well_label}`",
                 f"- Baseline spikes in current view: `{baseline_well_data.height}`",
                 f"- Exposure spikes in current view: `{exposure_well_data.height}`",
-                f"- Shared channels shown: `{len(channel_labels)}`",
+                f"- Shared channels shown: `{len(shared_channel_labels)}`",
             ]
         )
     )
