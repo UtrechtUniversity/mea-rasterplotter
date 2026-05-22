@@ -392,30 +392,22 @@ def _(
     x_pad_left,
     x_pad_right,
 ):
-    baseline_plot_settings = PlotSettings(
-        start_time=float(baseline_start_time.value),
-        end_time=float(baseline_end_time.value),
-        figure_width=float(figure_width.value),
-        figure_height=float(figure_height.value),
-        line_length=float(line_length.value),
-        line_width=float(line_width.value),
-        color=spike_color.value.strip() or "black",
-        x_pad_left=float(x_pad_left.value),
-        x_pad_right=float(x_pad_right.value),
-        show_channel_labels=bool(show_channel_labels.value),
-    )
-    exposure_plot_settings = PlotSettings(
-        start_time=float(exposure_start_time.value),
-        end_time=float(exposure_end_time.value),
-        figure_width=float(figure_width.value),
-        figure_height=float(figure_height.value),
-        line_length=float(line_length.value),
-        line_width=float(line_width.value),
-        color=spike_color.value.strip() or "black",
-        x_pad_left=float(x_pad_left.value),
-        x_pad_right=float(x_pad_right.value),
-        show_channel_labels=bool(show_channel_labels.value),
-    )
+    def make_plot_settings(start_widget, end_widget) -> PlotSettings:
+        return PlotSettings(
+            start_time=float(start_widget.value),
+            end_time=float(end_widget.value),
+            figure_width=float(figure_width.value),
+            figure_height=float(figure_height.value),
+            line_length=float(line_length.value),
+            line_width=float(line_width.value),
+            color=spike_color.value.strip() or "black",
+            x_pad_left=float(x_pad_left.value),
+            x_pad_right=float(x_pad_right.value),
+            show_channel_labels=bool(show_channel_labels.value),
+        )
+
+    baseline_plot_settings = make_plot_settings(baseline_start_time, baseline_end_time)
+    exposure_plot_settings = make_plot_settings(exposure_start_time, exposure_end_time)
     return baseline_plot_settings, exposure_plot_settings
 
 
