@@ -364,7 +364,19 @@ def _(
     x_pad_right = mo.ui.number(
         start=0, stop=5, step=0.05, value=1.25, label="X padding right"
     )
-    spike_color = mo.ui.text(label="Spike color", value="black")
+    spike_color = mo.ui.dropdown(
+        options={
+            "Black": "black",
+            "Dark gray": "0.25",
+            "Blue": "tab:blue",
+            "Orange": "tab:orange",
+            "Green": "tab:green",
+            "Red": "tab:red",
+            "Purple": "tab:purple",
+        },
+        value="Black",
+        label="Spike color",
+    )
     show_channel_labels = mo.ui.checkbox(label="Show channel labels", value=False)
     return (
         baseline_end_time,
@@ -407,7 +419,7 @@ def _(
             figure_height=float(figure_height.value),
             line_length=float(line_length.value),
             line_width=float(line_width.value),
-            color=spike_color.value.strip() or "black",
+            color=spike_color.value,
             x_pad_left=float(x_pad_left.value),
             x_pad_right=float(x_pad_right.value),
             show_channel_labels=bool(show_channel_labels.value),
