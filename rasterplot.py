@@ -18,7 +18,7 @@ def _():
     from pathlib import Path
 
     import marimo as mo
-    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
     import numpy as np
     import polars as pl
 
@@ -139,10 +139,11 @@ def _():
     ):
         window_start = min(settings.start_time, settings.end_time)
         window_end = max(settings.start_time, settings.end_time)
-        fig, ax = plt.subplots(
+        fig = Figure(
             figsize=(settings.figure_width, settings.figure_height),
             constrained_layout=True,
         )
+        ax = fig.subplots()
 
         if events:
             line_offsets = np.arange(1, len(events) + 1, dtype=float).tolist()
