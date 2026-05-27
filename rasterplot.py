@@ -338,8 +338,8 @@ def _(
     baseline_slider_stop,
     exposure_slider_start,
     exposure_slider_stop,
-    well_labels,
     mo,
+    well_labels,
 ):
     selected_well_value = well_labels[0] if well_labels else None
     selected_well = mo.ui.dropdown(
@@ -510,7 +510,7 @@ def _(
         well_label,
         exposure_plot_settings,
     )
-    return baseline_fig, shared_channel_labels, exposure_fig
+    return baseline_fig, exposure_fig, shared_channel_labels
 
 
 @app.cell(hide_code=True)
@@ -577,14 +577,27 @@ def _(
 
 @app.cell(hide_code=True)
 def _(baseline_fig, exposure_fig, mo):
-    baseline_ax = baseline_fig.axes[0] if baseline_fig.axes else baseline_fig.gca()
-    exposure_ax = exposure_fig.axes[0] if exposure_fig.axes else exposure_fig.gca()
+    import io
+
+
+    def _figure_image(mo, fig, alt: str):
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=fig.dpi, bbox_inches="tight")
+        width_px = int(round(fig.get_figwidth() * fig.dpi))
+        return mo.image(
+            buffer.getvalue(),
+            alt=alt,
+            width=f"{width_px}px",
+            style={"max-width": "none"},
+        )
+
+
     mo.vstack(
         [
             mo.md("### Baseline"),
-            mo.ui.matplotlib(baseline_ax),
+            _figure_image(mo, baseline_fig, "Baseline raster plot"),
             mo.md("### Exposure"),
-            mo.ui.matplotlib(exposure_ax),
+            _figure_image(mo, exposure_fig, "Exposure raster plot"),
         ],
         align="start",
         gap=1.0,
