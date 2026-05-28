@@ -654,16 +654,30 @@ def _(
         )
 
 
-    mo.vstack(
+    baseline_panel = mo.vstack(
         [
             mo.md("### Baseline"),
             baseline_fig,
             _plot_download(baseline_fig, "Baseline", well_label, baseline_plot_settings),
+        ],
+        align="start",
+        gap=0.5,
+    )
+    exposure_panel = mo.vstack(
+        [
             mo.md("### Exposure"),
             exposure_fig,
             _plot_download(exposure_fig, "Exposure", well_label, exposure_plot_settings),
         ],
         align="start",
+        gap=0.5,
+    )
+
+    mo.hstack(
+        [baseline_panel, exposure_panel],
+        widths="equal",
+        align="start",
+        wrap=True,
         gap=1.0,
     )
 
