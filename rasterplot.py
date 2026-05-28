@@ -33,6 +33,7 @@ def _():
         end_time: float
         figure_width: float
         figure_height: float
+        display_dpi: int
         line_length: float
         line_width: float
         color: str
@@ -174,6 +175,7 @@ def _():
         window_end = max(settings.start_time, settings.end_time)
         fig = Figure(
             figsize=(settings.figure_width, settings.figure_height),
+            dpi=settings.display_dpi,
             constrained_layout=True,
         )
         ax = fig.subplots()
@@ -377,17 +379,41 @@ def _(
         label="Exposure end time (s)",
     )
 
-    figure_width = mo.ui.number(start=4, stop=40, step=1, value=20, label="Figure width")
-    figure_height = mo.ui.number(start=2, stop=20, step=0.5, value=5, label="Figure height")
+    figure_width = mo.ui.number(start=4, stop=40, step=1, value=6, label="Figure width (in)")
+    figure_height = mo.ui.number(start=2, stop=20, step=0.5, value=4, label="Figure height (in)")
+    display_dpi = mo.ui.dropdown(
+        options={
+            "72": 72,
+            "100": 100,
+            "150": 150,
+            "200": 200,
+            "300": 300,
+            "600": 600,
+        },
+        value="100",
+        label="Display DPI",
+    )
+    download_dpi = mo.ui.dropdown(
+        options={
+            "72": 72,
+            "100": 100,
+            "150": 150,
+            "200": 200,
+            "300": 300,
+            "600": 600,
+        },
+        value="300",
+        label="Download DPI",
+    )
     line_length = mo.ui.number(
-        start=0.05, stop=2.0, step=0.05, value=0.8, label="Spike line length"
+        start=0.05, stop=2.0, step=0.05, value=0.8, label="Spike line length (y-axis units)"
     )
     line_width = mo.ui.number(
-        start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width"
+        start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width (pt)"
     )
-    x_pad_left = mo.ui.number(start=0, stop=5, step=0.05, value=0.25, label="X padding left")
+    x_pad_left = mo.ui.number(start=0, stop=5, step=0.05, value=1, label="X padding left (s)")
     x_pad_right = mo.ui.number(
-        start=0, stop=5, step=0.05, value=1.25, label="X padding right"
+        start=0, stop=5, step=0.05, value=0, label="X padding right (s)"
     )
     spike_color = mo.ui.dropdown(
         options={
@@ -402,10 +428,12 @@ def _(
         value="Black",
         label="Spike color",
     )
-    show_channel_labels = mo.ui.checkbox(label="Show channel labels", value=False)
+    show_channel_labels = mo.ui.checkbox(label="Show channel labels", value=True)
     return (
         baseline_end_time,
         baseline_start_time,
+        display_dpi,
+        download_dpi,
         exposure_end_time,
         exposure_start_time,
         figure_height,
@@ -425,6 +453,7 @@ def _(
     PlotSettings,
     baseline_end_time,
     baseline_start_time,
+    display_dpi,
     exposure_end_time,
     exposure_start_time,
     figure_height,
@@ -442,6 +471,7 @@ def _(
             end_time=float(end_widget.value),
             figure_width=float(figure_width.value),
             figure_height=float(figure_height.value),
+            display_dpi=int(display_dpi.value),
             line_length=float(line_length.value),
             line_width=float(line_width.value),
             color=spike_color.value,
@@ -525,6 +555,8 @@ def _(mo):
 def _(
     baseline_end_time,
     baseline_start_time,
+    display_dpi,
+    download_dpi,
     exposure_end_time,
     exposure_start_time,
     figure_height,
@@ -536,7 +568,6 @@ def _(
     show_channel_labels,
     spike_color,
     x_pad_left,
-    x_pad_right,
 ):
     shared_plot_settings = mo.accordion(
         {
@@ -544,10 +575,11 @@ def _(
                 [
                     figure_width,
                     figure_height,
+                    display_dpi,
+                    download_dpi,
                     line_length,
                     line_width,
                     x_pad_left,
-                    x_pad_right,
                     spike_color,
                 ],
                 align="stretch",
@@ -576,32 +608,65 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(baseline_fig, exposure_fig, mo):
+def _(
+    baseline_fig,
+    baseline_plot_settings,
+    download_dpi,
+    exposure_fig,
+    exposure_plot_settings,
+    mo,
+    well_label,
+):
     import io
+    import re
 
 
-    def _figure_image(mo, fig, alt: str):
+    def _figure_png_bytes(fig, dpi: int) -> bytes:
         buffer = io.BytesIO()
-        fig.savefig(buffer, format="png", dpi=fig.dpi, bbox_inches="tight")
-        width_px = int(round(fig.get_figwidth() * fig.dpi))
-        return mo.image(
-            buffer.getvalue(),
-            alt=alt,
-            width=f"{width_px}px",
-            style={"max-width": "none"},
+        fig.savefig(
+            buffer,
+            format="png",
+            dpi=dpi,
+            bbox_inches="tight",
+            facecolor="white",
+            edgecolor="none",
+        )
+        return buffer.getvalue()
+
+
+    def _download_filename(dataset_label: str, well_label: str, settings, dpi: int) -> str:
+        safe_well = re.sub(r"[^A-Za-z0-9_.-]+", "-", well_label or "none").strip("-")
+        start_time = min(settings.start_time, settings.end_time)
+        end_time = max(settings.start_time, settings.end_time)
+        return (
+            f"{dataset_label.lower()}_well-{safe_well}_"
+            f"{start_time:g}-{end_time:g}s_{dpi}dpi.png"
+        )
+
+
+    def _plot_download(fig, dataset_label: str, well_label: str, settings):
+        dpi = int(download_dpi.value)
+        return mo.download(
+            data=lambda: _figure_png_bytes(fig, dpi),
+            filename=_download_filename(dataset_label, well_label, settings, dpi),
+            mimetype="image/png",
+            label=f"Download {dataset_label.lower()} PNG",
         )
 
 
     mo.vstack(
         [
             mo.md("### Baseline"),
-            _figure_image(mo, baseline_fig, "Baseline raster plot"),
+            baseline_fig,
+            _plot_download(baseline_fig, "Baseline", well_label, baseline_plot_settings),
             mo.md("### Exposure"),
-            _figure_image(mo, exposure_fig, "Exposure raster plot"),
+            exposure_fig,
+            _plot_download(exposure_fig, "Exposure", well_label, exposure_plot_settings),
         ],
         align="start",
         gap=1.0,
     )
+
     return
 
 
