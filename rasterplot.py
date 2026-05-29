@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.5"
+__generated_with = "0.23.7"
 app = marimo.App(width="full")
 
 
@@ -18,7 +18,7 @@ def _():
     from pathlib import Path
 
     import marimo as mo
-    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
     import numpy as np
     import polars as pl
 
@@ -26,9 +26,6 @@ def _():
         "Channel_Label",
         "Well_Label",
         "Timestamp",
-        "Maximum_Amplitude",
-        "Minimum_Amplitude",
-        "Peak_to_peak_Amplitude",
     }
     @dataclass
     class PlotSettings:
@@ -36,6 +33,7 @@ def _():
         end_time: float
         figure_width: float
         figure_height: float
+        display_dpi: int
         line_length: float
         line_width: float
         color: str
@@ -52,11 +50,11 @@ def _():
                 f"{dataset_name} is missing required columns: {', '.join(missing)}"
             )
 
-    def load_spike_csv(path: Path) -> pl.DataFrame:
+    def load_spike_csv(path: Path, dataset_name: str = "Spike CSV") -> pl.DataFrame:
         if not path.is_file():
-            raise FileNotFoundError(f"Spike CSV not found: {path}")
+            raise FileNotFoundError(f"{dataset_name} not found: {path}")
         spikes = pl.read_csv(path)
-        assert_required_columns(spikes, SPIKE_REQUIRED_COLUMNS, "Spike CSV")
+        assert_required_columns(spikes, SPIKE_REQUIRED_COLUMNS, dataset_name)
         return spikes.with_columns(
             pl.col("Well_Label").cast(pl.Utf8, strict=False).alias("Well_Label"),
             pl.col("Timestamp").cast(pl.Float64, strict=False).alias("Timestamp"),
@@ -69,6 +67,46 @@ def _():
             .to_series()
             .to_list()
         )
+
+    def combine_available_wells(*well_lists: list[str]) -> list[str]:
+        well_labels: list[str] = []
+        seen: set[str] = set()
+        for well_list in well_lists:
+            for well in well_list:
+                well_label = str(well)
+                if well_label not in seen:
+                    well_labels.append(well_label)
+                    seen.add(well_label)
+        return well_labels
+
+    def channels_for_well(df: pl.DataFrame, well_label: str) -> list[str]:
+        return (
+            df.filter(
+                (pl.col("Well_Label") == well_label)
+                & pl.col("Channel_Label").is_not_null()
+            )
+            .select("Channel_Label")
+            .to_series()
+            .to_list()
+        )
+
+    def sorted_channel_union(*channel_lists: list[str]) -> list[str]:
+        return sorted({str(channel) for channel_list in channel_lists for channel in channel_list})
+
+    def timestamp_slider_bounds(df: pl.DataFrame) -> tuple[float, float]:
+        timestamp_bounds = df.select(
+            pl.col("Timestamp").min().alias("min_ts"),
+            pl.col("Timestamp").max().alias("max_ts"),
+        ).row(0)
+
+        min_ts = float(timestamp_bounds[0]) if timestamp_bounds[0] is not None else 0.0
+        max_ts = float(timestamp_bounds[1]) if timestamp_bounds[1] is not None else 1800.0
+
+        slider_start = float(np.floor(min_ts))
+        slider_stop = float(np.ceil(max_ts))
+        if slider_stop <= slider_start:
+            slider_stop = slider_start + 1.0
+        return slider_start, slider_stop
 
     def filter_well_window(
         df: pl.DataFrame, well_label: str, start_time: float, end_time: float
@@ -83,14 +121,10 @@ def _():
             & (pl.col("Timestamp") <= window_end)
         )
 
-    def build_event_series(df: pl.DataFrame) -> tuple[list[np.ndarray], list[str]]:
-        channel_order = (
-            df.select(pl.col("Channel_Label").unique(maintain_order=True))
-            .to_series()
-            .to_list()
-        )
+    def build_event_series(
+        df: pl.DataFrame, channel_order: list[str]
+    ) -> list[np.ndarray]:
         events: list[np.ndarray] = []
-        channel_labels: list[str] = []
 
         for channel in channel_order:
             timestamps = (
@@ -100,25 +134,51 @@ def _():
                 .drop_nulls()
                 .to_numpy()
             )
-            if timestamps.size == 0:
-                continue
             events.append(np.asarray(timestamps, dtype=float))
-            channel_labels.append(str(channel))
 
-        return events, channel_labels
+        return events
 
-    def render_raster(
+    def filter_well_for_plot(
+        df: pl.DataFrame, well_label: str, settings: PlotSettings
+    ) -> pl.DataFrame:
+        return filter_well_window(
+            df,
+            well_label,
+            settings.start_time,
+            settings.end_time,
+        )
+
+    def make_spike_raster_figure(
+        dataset_label: str,
+        well_spikes: pl.DataFrame,
+        channel_labels: list[str],
+        well_label: str,
+        settings: PlotSettings,
+    ) -> Figure:
+        events = build_event_series(well_spikes, channel_labels)
+        return make_eventplot_figure(
+            events,
+            channel_labels,
+            well_label,
+            settings,
+            title=f"{dataset_label} Raster Plot for Well {well_label}",
+        )
+
+    def make_eventplot_figure(
         events: list[np.ndarray],
         channel_labels: list[str],
         well_label: str,
         settings: PlotSettings,
+        title: str | None = None,
     ):
         window_start = min(settings.start_time, settings.end_time)
         window_end = max(settings.start_time, settings.end_time)
-        fig, ax = plt.subplots(
+        fig = Figure(
             figsize=(settings.figure_width, settings.figure_height),
+            dpi=settings.display_dpi,
             constrained_layout=True,
         )
+        ax = fig.subplots()
 
         if events:
             line_offsets = np.arange(1, len(events) + 1, dtype=float).tolist()
@@ -150,7 +210,7 @@ def _():
         ax.set_xlim(window_start - settings.x_pad_left, window_end + settings.x_pad_right)
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("")
-        ax.set_title(f"Raster Plot for Well {well_label}")
+        ax.set_title(title or f"Raster Plot for Well {well_label}")
         ax.grid(False)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -161,158 +221,221 @@ def _():
         Path,
         PlotSettings,
         available_wells,
-        build_event_series,
-        filter_well_window,
+        channels_for_well,
+        combine_available_wells,
+        filter_well_for_plot,
         load_spike_csv,
+        make_spike_raster_figure,
         mo,
-        np,
-        pl,
-        render_raster,
+        sorted_channel_union,
+        timestamp_slider_bounds,
     )
 
 
 @app.cell
 def _(Path):
     notebook_dir = Path(__file__).resolve().parent
-    default_spike_csv = (
-        notebook_dir
-    )
-    return (default_spike_csv,)
+    initial_csv_dir = notebook_dir
+    return (initial_csv_dir,)
 
 
 @app.cell
-def _(default_spike_csv, mo):
-    show_spike_picker, set_show_spike_picker = mo.state(
-        not default_spike_csv.is_file()
-    )
-    return set_show_spike_picker, show_spike_picker
+def _(mo):
+    show_csv_pickers, set_show_csv_pickers = mo.state(True)
+    return set_show_csv_pickers, show_csv_pickers
 
 
 @app.cell
-def _(default_spike_csv, mo, set_show_spike_picker):
-    spike_csv_toggle = mo.ui.button(
-        label="Choose/change spike CSV",
-        on_click=lambda _: set_show_spike_picker(lambda current: not current),
+def _(initial_csv_dir, mo, set_show_csv_pickers):
+    csv_picker_toggle = mo.ui.button(
+        label="Choose/change CSV files",
+        on_click=lambda _: set_show_csv_pickers(lambda current: not current),
     )
-    spike_csv_path = mo.ui.file_browser(
-        initial_path=default_spike_csv.parent,
+    baseline_csv_picker = mo.ui.file_browser(
+        initial_path=initial_csv_dir,
         filetypes=[".csv"],
         multiple=False,
-        label="Spike CSV file",
-        on_change=lambda _: set_show_spike_picker(False),
+        label="Baseline CSV file",
+        on_change=lambda _: set_show_csv_pickers(False),
     )
-    return spike_csv_path, spike_csv_toggle
+    exposure_csv_picker = mo.ui.file_browser(
+        initial_path=initial_csv_dir,
+        filetypes=[".csv"],
+        multiple=False,
+        label="Exposure CSV file",
+        on_change=lambda _: set_show_csv_pickers(False),
+    )
+    return baseline_csv_picker, csv_picker_toggle, exposure_csv_picker
 
 
 @app.cell
 def _(
-    default_spike_csv,
+    baseline_csv_picker,
+    csv_picker_toggle,
+    exposure_csv_picker,
     mo,
-    show_spike_picker,
-    spike_csv_path,
-    spike_csv_toggle,
+    show_csv_pickers,
 ):
-    displayed_spike_csv = spike_csv_path.path(0) or (
-        default_spike_csv if default_spike_csv.is_file() else ""
-    )
+    displayed_baseline_csv = baseline_csv_picker.path(0) or ""
+    displayed_exposure_csv = exposure_csv_picker.path(0) or ""
     input_widgets = [
         mo.md("### Inputs"),
-        mo.md(f"Selected spike CSV: `{displayed_spike_csv}`"),
-        spike_csv_toggle,
+        mo.md(f"Baseline CSV: `{displayed_baseline_csv or 'None selected'}`"),
+        mo.md(f"Exposure CSV: `{displayed_exposure_csv or 'None selected'}`"),
+        csv_picker_toggle,
     ]
-    if show_spike_picker():
-        input_widgets.append(spike_csv_path)
-    if not displayed_spike_csv:
+    if show_csv_pickers() or not (displayed_baseline_csv and displayed_exposure_csv):
+        input_widgets.extend([baseline_csv_picker, exposure_csv_picker])
+    if not displayed_baseline_csv or not displayed_exposure_csv:
         input_widgets.append(
-            mo.md("Select a spike CSV to continue.").callout(kind="warn")
+            mo.md("Select both a baseline CSV and an exposure CSV to continue.").callout(kind="warn")
         )
     mo.vstack(input_widgets, align="stretch", gap=0.3)
     return
 
 
 @app.cell
-def _(Path, default_spike_csv, mo, spike_csv_path):
-    selected_spike_csv_path = spike_csv_path.path(0)
-    resolved_spike_csv = (
-        Path(selected_spike_csv_path)
-        if selected_spike_csv_path
-        else (default_spike_csv if default_spike_csv.is_file() else None)
+def _(Path, baseline_csv_picker, exposure_csv_picker, mo):
+    selected_baseline_csv = baseline_csv_picker.path(0)
+    selected_exposure_csv = exposure_csv_picker.path(0)
+    resolved_baseline_csv = Path(selected_baseline_csv) if selected_baseline_csv else None
+    resolved_exposure_csv = Path(selected_exposure_csv) if selected_exposure_csv else None
+    mo.stop(resolved_baseline_csv is None or resolved_exposure_csv is None)
+    return resolved_baseline_csv, resolved_exposure_csv
+
+
+@app.cell
+def _(load_spike_csv, mo, resolved_baseline_csv, resolved_exposure_csv):
+    mo.stop(resolved_baseline_csv is None or resolved_exposure_csv is None)
+    baseline_data = load_spike_csv(resolved_baseline_csv, "Baseline CSV")
+    exposure_data = load_spike_csv(resolved_exposure_csv, "Exposure CSV")
+    baseline_csv = resolved_baseline_csv
+    exposure_csv = resolved_exposure_csv
+    return baseline_csv, baseline_data, exposure_csv, exposure_data
+
+
+@app.cell
+def _(available_wells, baseline_data, combine_available_wells, exposure_data):
+    baseline_wells = available_wells(baseline_data)
+    exposure_wells = available_wells(exposure_data)
+    well_labels = combine_available_wells(baseline_wells, exposure_wells)
+    return (well_labels,)
+
+
+@app.cell
+def _(baseline_data, exposure_data, timestamp_slider_bounds):
+    baseline_slider_start, baseline_slider_stop = timestamp_slider_bounds(baseline_data)
+    exposure_slider_start, exposure_slider_stop = timestamp_slider_bounds(exposure_data)
+    return (
+        baseline_slider_start,
+        baseline_slider_stop,
+        exposure_slider_start,
+        exposure_slider_stop,
     )
-    mo.stop(resolved_spike_csv is None)
-    return (resolved_spike_csv,)
 
 
 @app.cell
-def _(load_spike_csv, mo, resolved_spike_csv):
-    mo.stop(resolved_spike_csv is None)
-    rasterplot_data = load_spike_csv(resolved_spike_csv)
-    spike_csv = resolved_spike_csv
-    return rasterplot_data, spike_csv
-
-
-@app.cell
-def _(available_wells, rasterplot_data):
-    wells = available_wells(rasterplot_data)
-    return (wells,)
-
-
-@app.cell
-def _(np, pl, rasterplot_data):
-    timestamp_bounds = rasterplot_data.select(
-        pl.col("Timestamp").min().alias("min_ts"),
-        pl.col("Timestamp").max().alias("max_ts"),
-    ).row(0)
-
-    min_ts = float(timestamp_bounds[0]) if timestamp_bounds[0] is not None else 0.0
-    max_ts = float(timestamp_bounds[1]) if timestamp_bounds[1] is not None else 1800.0
-
-    slider_start = float(np.floor(min_ts))
-    slider_stop = float(np.ceil(max_ts))
-    if slider_stop <= slider_start:
-        slider_stop = slider_start + 1.0
-    return slider_start, slider_stop
-
-
-@app.cell
-def _(mo, slider_start, slider_stop, wells):
-    selected_well_value = wells[0] if wells else None
+def _(
+    baseline_slider_start,
+    baseline_slider_stop,
+    exposure_slider_start,
+    exposure_slider_stop,
+    mo,
+    well_labels,
+):
+    selected_well_value = well_labels[0] if well_labels else None
     selected_well = mo.ui.dropdown(
-        options=wells,
+        options=well_labels,
         value=selected_well_value,
         label="Selected well",
     )
 
-    start_time = mo.ui.number(
-        start=slider_start,
-        stop=slider_stop,
+    baseline_start_time = mo.ui.number(
+        start=baseline_slider_start,
+        stop=baseline_slider_stop,
         step=0.1,
-        value=max(0.0, slider_start),
-        label="Start time (s)",
+        value=max(0.0, baseline_slider_start),
+        label="Baseline start time (s)",
     )
-    end_time = mo.ui.number(
-        start=slider_start,
-        stop=slider_stop,
+    baseline_end_time = mo.ui.number(
+        start=baseline_slider_start,
+        stop=baseline_slider_stop,
         step=0.1,
-        value=min(120.0, slider_stop),
-        label="End time (s)",
+        value=min(120.0, baseline_slider_stop),
+        label="Baseline end time (s)",
+    )
+    exposure_start_time = mo.ui.number(
+        start=exposure_slider_start,
+        stop=exposure_slider_stop,
+        step=0.1,
+        value=max(0.0, exposure_slider_start),
+        label="Exposure start time (s)",
+    )
+    exposure_end_time = mo.ui.number(
+        start=exposure_slider_start,
+        stop=exposure_slider_stop,
+        step=0.1,
+        value=min(120.0, exposure_slider_stop),
+        label="Exposure end time (s)",
     )
 
-    figure_width = mo.ui.number(start=4, stop=40, step=1, value=20, label="Figure width")
-    figure_height = mo.ui.number(start=2, stop=20, step=0.5, value=5, label="Figure height")
+    figure_width = mo.ui.number(start=4, stop=40, step=1, value=6, label="Figure width (in)")
+    figure_height = mo.ui.number(start=2, stop=20, step=0.5, value=4, label="Figure height (in)")
+    display_dpi = mo.ui.dropdown(
+        options={
+            "72": 72,
+            "100": 100,
+            "150": 150,
+            "200": 200,
+            "300": 300,
+            "600": 600,
+        },
+        value="100",
+        label="Display DPI",
+    )
+    download_dpi = mo.ui.dropdown(
+        options={
+            "72": 72,
+            "100": 100,
+            "150": 150,
+            "200": 200,
+            "300": 300,
+            "600": 600,
+        },
+        value="300",
+        label="Download DPI",
+    )
     line_length = mo.ui.number(
-        start=0.05, stop=2.0, step=0.05, value=0.8, label="Spike line length"
+        start=0.05, stop=2.0, step=0.05, value=0.8, label="Spike line length (y-axis units)"
     )
     line_width = mo.ui.number(
-        start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width"
+        start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width (pt)"
     )
-    x_pad_left = mo.ui.number(start=0, stop=5, step=0.05, value=0.25, label="X padding left")
+    x_pad_left = mo.ui.number(start=0, stop=5, step=0.05, value=1, label="X padding left (s)")
     x_pad_right = mo.ui.number(
-        start=0, stop=5, step=0.05, value=1.25, label="X padding right"
+        start=0, stop=5, step=0.05, value=0, label="X padding right (s)"
     )
-    spike_color = mo.ui.text(label="Spike color", value="black")
-    show_channel_labels = mo.ui.checkbox(label="Show channel labels", value=False)
+    spike_color = mo.ui.dropdown(
+        options={
+            "Black": "black",
+            "Dark gray": "0.25",
+            "Blue": "tab:blue",
+            "Orange": "tab:orange",
+            "Green": "tab:green",
+            "Red": "tab:red",
+            "Purple": "tab:purple",
+        },
+        value="Black",
+        label="Spike color",
+    )
+    show_channel_labels = mo.ui.checkbox(label="Show channel labels", value=True)
     return (
-        end_time,
+        baseline_end_time,
+        baseline_start_time,
+        display_dpi,
+        download_dpi,
+        exposure_end_time,
+        exposure_start_time,
         figure_height,
         figure_width,
         line_length,
@@ -320,7 +443,6 @@ def _(mo, slider_start, slider_stop, wells):
         selected_well,
         show_channel_labels,
         spike_color,
-        start_time,
         x_pad_left,
         x_pad_right,
     )
@@ -329,49 +451,96 @@ def _(mo, slider_start, slider_stop, wells):
 @app.cell
 def _(
     PlotSettings,
-    end_time,
+    baseline_end_time,
+    baseline_start_time,
+    display_dpi,
+    exposure_end_time,
+    exposure_start_time,
     figure_height,
     figure_width,
     line_length,
     line_width,
     show_channel_labels,
     spike_color,
-    start_time,
     x_pad_left,
     x_pad_right,
 ):
-    plot_settings = PlotSettings(
-        start_time=float(start_time.value),
-        end_time=float(end_time.value),
-        figure_width=float(figure_width.value),
-        figure_height=float(figure_height.value),
-        line_length=float(line_length.value),
-        line_width=float(line_width.value),
-        color=spike_color.value.strip() or "black",
-        x_pad_left=float(x_pad_left.value),
-        x_pad_right=float(x_pad_right.value),
-        show_channel_labels=bool(show_channel_labels.value),
-    )
-    return (plot_settings,)
+    def make_plot_settings(start_widget, end_widget) -> PlotSettings:
+        return PlotSettings(
+            start_time=float(start_widget.value),
+            end_time=float(end_widget.value),
+            figure_width=float(figure_width.value),
+            figure_height=float(figure_height.value),
+            display_dpi=int(display_dpi.value),
+            line_length=float(line_length.value),
+            line_width=float(line_width.value),
+            color=spike_color.value,
+            x_pad_left=float(x_pad_left.value),
+            x_pad_right=float(x_pad_right.value),
+            show_channel_labels=bool(show_channel_labels.value),
+        )
+
+    baseline_plot_settings = make_plot_settings(baseline_start_time, baseline_end_time)
+    exposure_plot_settings = make_plot_settings(exposure_start_time, exposure_end_time)
+    return baseline_plot_settings, exposure_plot_settings
 
 
 @app.cell
-def _(filter_well_window, plot_settings, rasterplot_data, selected_well):
+def _(
+    baseline_data,
+    baseline_plot_settings,
+    exposure_data,
+    exposure_plot_settings,
+    filter_well_for_plot,
+    selected_well,
+):
     well_label = "" if selected_well.value is None else str(selected_well.value).strip()
-    well_data = filter_well_window(
-        rasterplot_data,
+    baseline_well_data = filter_well_for_plot(
+        baseline_data,
         well_label,
-        plot_settings.start_time,
-        plot_settings.end_time,
+        baseline_plot_settings,
     )
-    return well_data, well_label
+    exposure_well_data = filter_well_for_plot(
+        exposure_data,
+        well_label,
+        exposure_plot_settings,
+    )
+    return baseline_well_data, exposure_well_data, well_label
 
 
 @app.cell
-def _(build_event_series, plot_settings, render_raster, well_data, well_label):
-    events, channel_labels = build_event_series(well_data)
-    fig = render_raster(events, channel_labels, well_label, plot_settings)
-    return channel_labels, fig
+def _(
+    baseline_data,
+    baseline_plot_settings,
+    baseline_well_data,
+    channels_for_well,
+    exposure_data,
+    exposure_plot_settings,
+    exposure_well_data,
+    make_spike_raster_figure,
+    sorted_channel_union,
+    well_label,
+):
+    baseline_channel_labels = channels_for_well(baseline_data, well_label)
+    exposure_channel_labels = channels_for_well(exposure_data, well_label)
+    shared_channel_labels = sorted_channel_union(
+        baseline_channel_labels, exposure_channel_labels
+    )
+    baseline_fig = make_spike_raster_figure(
+        "Baseline",
+        baseline_well_data,
+        shared_channel_labels,
+        well_label,
+        baseline_plot_settings,
+    )
+    exposure_fig = make_spike_raster_figure(
+        "Exposure",
+        exposure_well_data,
+        shared_channel_labels,
+        well_label,
+        exposure_plot_settings,
+    )
+    return baseline_fig, exposure_fig, shared_channel_labels
 
 
 @app.cell(hide_code=True)
@@ -384,8 +553,12 @@ def _(mo):
 
 @app.cell
 def _(
-    end_time,
-    fig,
+    baseline_end_time,
+    baseline_start_time,
+    display_dpi,
+    download_dpi,
+    exposure_end_time,
+    exposure_start_time,
     figure_height,
     figure_width,
     line_length,
@@ -394,34 +567,141 @@ def _(
     selected_well,
     show_channel_labels,
     spike_color,
-    start_time,
     x_pad_left,
-    x_pad_right,
 ):
+    shared_plot_settings = mo.accordion(
+        {
+            "Plot Settings": mo.vstack(
+                [
+                    figure_width,
+                    figure_height,
+                    display_dpi,
+                    download_dpi,
+                    line_length,
+                    line_width,
+                    x_pad_left,
+                    spike_color,
+                ],
+                align="stretch",
+                gap=0.3,
+            )
+        }
+    )
+    baseline_time_window_panel = mo.vstack(
+        [
+            mo.md("### Baseline Time Window"),
+            baseline_start_time,
+            baseline_end_time,
+        ],
+        align="stretch",
+        gap=0.3,
+    )
+    exposure_time_window_panel = mo.vstack(
+        [
+            mo.md("### Exposure Time Window"),
+            exposure_start_time,
+            exposure_end_time,
+        ],
+        align="stretch",
+        gap=0.3,
+    )
+    time_window_controls = mo.hstack(
+        [baseline_time_window_panel, exposure_time_window_panel],
+        widths="equal",
+        align="start",
+        wrap=True,
+        gap=1.0,
+    )
     plot_control_widgets = [
+        shared_plot_settings,
         mo.md("### Plot Controls"),
         selected_well,
-        mo.md("### Plot Window"),
-        start_time,
-        end_time,
-        mo.md("### Plot Settings"),
-        figure_width,
-        figure_height,
-        line_length,
-        line_width,
-        x_pad_left,
-        x_pad_right,
-        spike_color,
         show_channel_labels,
+        time_window_controls,
     ]
-    controls = mo.vstack(
+    mo.vstack(
         plot_control_widgets,
         align="stretch",
         gap=0.3,
     )
 
-    ax = fig.axes[0] if fig.axes else fig.gca()
-    mo.vstack([controls, mo.ui.matplotlib(ax)], align="start", gap=1.5)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    baseline_fig,
+    baseline_plot_settings,
+    download_dpi,
+    exposure_fig,
+    exposure_plot_settings,
+    mo,
+    well_label,
+):
+    import io
+    import re
+
+
+    def _figure_png_bytes(fig, dpi: int) -> bytes:
+        buffer = io.BytesIO()
+        fig.savefig(
+            buffer,
+            format="png",
+            dpi=dpi,
+            bbox_inches="tight",
+            facecolor="white",
+            edgecolor="none",
+        )
+        return buffer.getvalue()
+
+
+    def _download_filename(dataset_label: str, well_label: str, settings, dpi: int) -> str:
+        safe_well = re.sub(r"[^A-Za-z0-9_.-]+", "-", well_label or "none").strip("-")
+        start_time = min(settings.start_time, settings.end_time)
+        end_time = max(settings.start_time, settings.end_time)
+        return (
+            f"{dataset_label.lower()}_well-{safe_well}_"
+            f"{start_time:g}-{end_time:g}s_{dpi}dpi.png"
+        )
+
+
+    def _plot_download(fig, dataset_label: str, well_label: str, settings):
+        dpi = int(download_dpi.value)
+        return mo.download(
+            data=lambda: _figure_png_bytes(fig, dpi),
+            filename=_download_filename(dataset_label, well_label, settings, dpi),
+            mimetype="image/png",
+            label=f"Download {dataset_label.lower()} PNG",
+        )
+
+
+    baseline_panel = mo.vstack(
+        [
+            mo.md("### Baseline"),
+            baseline_fig,
+            _plot_download(baseline_fig, "Baseline", well_label, baseline_plot_settings),
+        ],
+        align="start",
+        gap=0.5,
+    )
+    exposure_panel = mo.vstack(
+        [
+            mo.md("### Exposure"),
+            exposure_fig,
+            _plot_download(exposure_fig, "Exposure", well_label, exposure_plot_settings),
+        ],
+        align="start",
+        gap=0.5,
+    )
+
+    mo.hstack(
+        [baseline_panel, exposure_panel],
+        widths="equal",
+        align="start",
+        wrap=True,
+        gap=1.0,
+    )
+
     return
 
 
@@ -434,18 +714,28 @@ def _(mo):
 
 
 @app.cell
-def _(channel_labels, mo, spike_csv, well_data, well_label, wells):
+def _(
+    baseline_csv,
+    baseline_well_data,
+    exposure_csv,
+    exposure_well_data,
+    mo,
+    shared_channel_labels,
+    well_label,
+    well_labels,
+):
     selected_well_label = well_label or "None"
-    summary_spike_csv = spike_csv or ""
     mo.md(
         "\n".join(
             [
                 "### Data Summary",
-                f"- Spike CSV: `{summary_spike_csv}`",
-                f"- Available wells in data: `{len(wells)}`",
+                f"- Baseline CSV: `{baseline_csv}`",
+                f"- Exposure CSV: `{exposure_csv}`",
+                f"- Available wells across both files: `{len(well_labels)}`",
                 f"- Selected well: `{selected_well_label}`",
-                f"- Spikes in current view: `{well_data.height}`",
-                f"- Channels in current view: `{len(channel_labels)}`",
+                f"- Baseline spikes in current view: `{baseline_well_data.height}`",
+                f"- Exposure spikes in current view: `{exposure_well_data.height}`",
+                f"- Shared channels shown: `{len(shared_channel_labels)}`",
             ]
         )
     )
