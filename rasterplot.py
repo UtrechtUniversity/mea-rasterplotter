@@ -587,23 +587,44 @@ def _(
             )
         }
     )
+    baseline_time_window_panel = mo.vstack(
+        [
+            mo.md("### Baseline Time Window"),
+            baseline_start_time,
+            baseline_end_time,
+        ],
+        align="stretch",
+        gap=0.3,
+    )
+    exposure_time_window_panel = mo.vstack(
+        [
+            mo.md("### Exposure Time Window"),
+            exposure_start_time,
+            exposure_end_time,
+        ],
+        align="stretch",
+        gap=0.3,
+    )
+    time_window_controls = mo.hstack(
+        [baseline_time_window_panel, exposure_time_window_panel],
+        widths="equal",
+        align="start",
+        wrap=True,
+        gap=1.0,
+    )
     plot_control_widgets = [
         shared_plot_settings,
         mo.md("### Plot Controls"),
         selected_well,
         show_channel_labels,
-        mo.md("### Baseline Time Window"),
-        baseline_start_time,
-        baseline_end_time,
-        mo.md("### Exposure Time Window"),
-        exposure_start_time,
-        exposure_end_time,
+        time_window_controls,
     ]
     mo.vstack(
         plot_control_widgets,
         align="stretch",
         gap=0.3,
     )
+
     return
 
 
