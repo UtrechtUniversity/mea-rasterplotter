@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.7"
+__generated_with = "0.23.8"
 app = marimo.App(width="full")
 
 
@@ -108,6 +108,33 @@ def _():
             slider_stop = slider_start + 1.0
         return slider_start, slider_stop
 
+    def nice_time_scale_seconds(window_seconds: float) -> float:
+        if not np.isfinite(window_seconds) or window_seconds <= 0:
+            return 0.0
+
+        max_scale = 0.5 * window_seconds
+        target_scale = 0.2 * window_seconds
+        exponent_min = int(np.floor(np.log10(max_scale))) - 1
+        exponent_max = int(np.ceil(np.log10(max_scale))) + 1
+        candidates = sorted(
+            {
+                base * (10.0**exponent)
+                for exponent in range(exponent_min, exponent_max + 1)
+                for base in (1.0, 2.0, 5.0)
+                if 0 < base * (10.0**exponent) <= max_scale
+            }
+        )
+        if not candidates:
+            return max_scale
+        return min(candidates, key=lambda candidate: abs(candidate - target_scale))
+
+    def format_time_scale_label(seconds: float) -> str:
+        if seconds == 1:
+            return "1 second"
+        if float(seconds).is_integer():
+            return f"{int(seconds)} seconds"
+        return f"{seconds:g} seconds"
+
     def filter_well_window(
         df: pl.DataFrame, well_label: str, start_time: float, end_time: float
     ) -> pl.DataFrame:
@@ -173,12 +200,18 @@ def _():
     ):
         window_start = min(settings.start_time, settings.end_time)
         window_end = max(settings.start_time, settings.end_time)
+        window_seconds = window_end - window_start
+        scale_seconds = nice_time_scale_seconds(window_seconds)
         fig = Figure(
             figsize=(settings.figure_width, settings.figure_height),
             dpi=settings.display_dpi,
             constrained_layout=True,
         )
-        ax = fig.subplots()
+        ax, scale_ax = fig.subplots(
+            nrows=2,
+            sharex=True,
+            gridspec_kw={"height_ratios": [1.0, 0.1], "hspace": 0.02},
+        )
 
         if events:
             line_offsets = np.arange(1, len(events) + 1, dtype=float).tolist()
@@ -208,13 +241,44 @@ def _():
             )
 
         ax.set_xlim(window_start - settings.x_pad_left, window_end + settings.x_pad_right)
-        ax.set_xlabel("Time (s)")
+        ax.tick_params(axis="x", bottom=False, labelbottom=False)
         ax.set_ylabel("")
         ax.set_title(title or f"Raster Plot for Well {well_label}")
         ax.grid(False)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_visible(False)
+
+        scale_ax.set_ylim(0, 1)
+        scale_ax.tick_params(
+            axis="both",
+            left=False,
+            labelleft=False,
+            bottom=False,
+            labelbottom=False,
+        )
+        scale_ax.grid(False)
+        for spine in scale_ax.spines.values():
+            spine.set_visible(False)
+        if scale_seconds > 0:
+            scale_end = window_end
+            scale_start = scale_end - scale_seconds
+            scale_ax.plot(
+                [scale_start, scale_end],
+                [0.25, 0.25],
+                color="black",
+                linewidth=3,
+                solid_capstyle="butt",
+                clip_on=False,
+            )
+            scale_ax.text(
+                scale_start + scale_seconds / 2,
+                0.4,
+                format_time_scale_label(scale_seconds),
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
         return fig
 
     return (
@@ -624,7 +688,6 @@ def _(
         align="stretch",
         gap=0.3,
     )
-
     return
 
 
@@ -701,7 +764,6 @@ def _(
         wrap=True,
         gap=1.0,
     )
-
     return
 
 
