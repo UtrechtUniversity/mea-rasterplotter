@@ -248,6 +248,7 @@ def _():
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_visible(False)
+        ax.spines["bottom"].set_bounds(window_start, window_end)
 
         scale_ax.set_ylim(0, 1)
         scale_ax.tick_params(
