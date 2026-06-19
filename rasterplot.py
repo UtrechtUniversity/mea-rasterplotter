@@ -227,6 +227,7 @@ def _():
             if settings.show_channel_labels:
                 ax.set_yticks(line_offsets)
                 ax.set_yticklabels(channel_labels, fontsize=9)
+                ax.tick_params(axis="y", length=0)
             else:
                 ax.set_yticks([])
         else:
