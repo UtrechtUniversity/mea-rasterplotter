@@ -79,13 +79,10 @@ def _():
                     seen.add(well_label)
         return well_labels
 
-    def channels_for_well(df: pl.DataFrame, well_label: str) -> list[str]:
+    def available_channels(df: pl.DataFrame) -> list[str]:
         return (
-            df.filter(
-                (pl.col("Well_Label") == well_label)
-                & pl.col("Channel_Label").is_not_null()
-            )
-            .select("Channel_Label")
+            df.filter(pl.col("Channel_Label").is_not_null())
+            .select(pl.col("Channel_Label").cast(pl.Utf8))
             .to_series()
             .to_list()
         )
@@ -286,8 +283,8 @@ def _():
     return (
         Path,
         PlotSettings,
+        available_channels,
         available_wells,
-        channels_for_well,
         combine_available_wells,
         filter_well_for_plot,
         load_spike_csv,
@@ -381,11 +378,25 @@ def _(load_spike_csv, mo, resolved_baseline_csv, resolved_exposure_csv):
 
 
 @app.cell
-def _(available_wells, baseline_data, combine_available_wells, exposure_data):
+def _(
+    available_channels,
+    available_wells,
+    baseline_data,
+    combine_available_wells,
+    exposure_data,
+    sorted_channel_union,
+):
     baseline_wells = available_wells(baseline_data)
     exposure_wells = available_wells(exposure_data)
     well_labels = combine_available_wells(baseline_wells, exposure_wells)
-    return (well_labels,)
+    _baseline_channel_labels = available_channels(baseline_data)
+    _exposure_channel_labels = available_channels(exposure_data)
+    shared_channel_labels = sorted_channel_union(
+        _baseline_channel_labels,
+        _exposure_channel_labels,
+    )
+
+    return shared_channel_labels, well_labels
 
 
 @app.cell
@@ -576,22 +587,14 @@ def _(
 
 @app.cell
 def _(
-    baseline_data,
     baseline_plot_settings,
     baseline_well_data,
-    channels_for_well,
-    exposure_data,
     exposure_plot_settings,
     exposure_well_data,
     make_spike_raster_figure,
-    sorted_channel_union,
+    shared_channel_labels,
     well_label,
 ):
-    baseline_channel_labels = channels_for_well(baseline_data, well_label)
-    exposure_channel_labels = channels_for_well(exposure_data, well_label)
-    shared_channel_labels = sorted_channel_union(
-        baseline_channel_labels, exposure_channel_labels
-    )
     baseline_fig = make_spike_raster_figure(
         "Baseline",
         baseline_well_data,
@@ -606,7 +609,8 @@ def _(
         well_label,
         exposure_plot_settings,
     )
-    return baseline_fig, exposure_fig, shared_channel_labels
+
+    return baseline_fig, exposure_fig
 
 
 @app.cell(hide_code=True)
