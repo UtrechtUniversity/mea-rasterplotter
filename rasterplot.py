@@ -81,8 +81,12 @@ def _():
 
     def available_channels(df: pl.DataFrame) -> list[str]:
         return (
-            df.filter(pl.col("Channel_Label").is_not_null())
-            .select(pl.col("Channel_Label").cast(pl.Utf8))
+            df.select(
+                pl.col("Channel_Label")
+                .cast(pl.Utf8)
+                .drop_nulls()
+                .unique()
+            )
             .to_series()
             .to_list()
         )
