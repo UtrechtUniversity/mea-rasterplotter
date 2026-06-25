@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.8"
+__generated_with = "0.23.10"
 app = marimo.App(width="full")
 
 
@@ -166,6 +166,38 @@ def _():
 
         return events
 
+    def build_spike_count_trace(
+        df: pl.DataFrame,
+        window_start: float,
+        window_end: float,
+        bin_width_seconds: float = 0.001,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if bin_width_seconds <= 0:
+            raise ValueError("bin_width_seconds must be positive")
+
+        # Selected time span in seconds; clamp reversed/empty windows to a single bin:
+        window_seconds = max(0.0, window_end - window_start)
+        # Number of fixed-width histogram bins needed to cover the selected window:
+        bin_count = max(1, int(np.ceil(window_seconds / bin_width_seconds)))
+        # Absolute timestamp boundaries for np.histogram (not offsets from zero):
+        bin_edges = window_start + np.arange(bin_count + 1, dtype=float) * bin_width_seconds
+        if window_seconds > 0:
+            # Clamp the final edge so the trace ends exactly at the requested window end:
+            bin_edges[-1] = window_end
+
+        timestamps = (
+            df.select("Timestamp")
+            .to_series()
+            .drop_nulls()
+            .to_numpy()
+        )
+        # np.histogram gives one spike count sum per interval
+        spike_counts, _ = np.histogram(
+            np.asarray(timestamps, dtype=float),
+            bins=bin_edges,
+        )
+        return bin_edges, spike_counts
+
     def filter_well_for_plot(
         df: pl.DataFrame, well_label: str, settings: PlotSettings
     ) -> pl.DataFrame:
@@ -183,10 +215,19 @@ def _():
         well_label: str,
         settings: PlotSettings,
     ) -> Figure:
+        window_start = min(settings.start_time, settings.end_time)
+        window_end = max(settings.start_time, settings.end_time)
         events = build_event_series(well_spikes, channel_labels)
+        spike_bin_edges, spike_bin_counts = build_spike_count_trace(
+            well_spikes,
+            window_start,
+            window_end,
+        )
         return make_eventplot_figure(
             events,
             channel_labels,
+            spike_bin_edges,
+            spike_bin_counts,
             well_label,
             settings,
             title=f"{dataset_label} Raster Plot for Well {well_label}",
@@ -195,6 +236,8 @@ def _():
     def make_eventplot_figure(
         events: list[np.ndarray],
         channel_labels: list[str],
+        spike_bin_edges: np.ndarray,
+        spike_bin_counts: np.ndarray,
         well_label: str,
         settings: PlotSettings,
         title: str | None = None,
@@ -208,11 +251,29 @@ def _():
             dpi=settings.display_dpi,
             constrained_layout=True,
         )
-        ax, scale_ax = fig.subplots(
-            nrows=2,
+        trace_ax, ax, scale_ax = fig.subplots(
+            nrows=3,
             sharex=True,
-            gridspec_kw={"height_ratios": [1.0, 0.1], "hspace": 0.02},
+            gridspec_kw={"height_ratios": [0.4, 1.0, 0.1], "hspace": 0.04},
         )
+
+        if len(spike_bin_edges) > 0 and len(spike_bin_counts) > 0:
+            trace_ax.step(
+                spike_bin_edges,
+                np.r_[spike_bin_counts, spike_bin_counts[-1]],
+                where="post",
+                color=settings.color,
+                linewidth=max(0.8, settings.line_width),
+            )
+        trace_ax.set_ylim(bottom=0)
+        trace_ax.set_title(title or f"Raster Plot for Well {well_label}")
+        trace_ax.tick_params(axis="x", bottom=False, labelbottom=False)
+        trace_ax.tick_params(axis="y", labelsize=8)
+        trace_ax.grid(False)
+        trace_ax.spines["top"].set_visible(False)
+        trace_ax.spines["right"].set_visible(False)
+        trace_ax.spines["bottom"].set_visible(False)
+        trace_ax.spines["left"].set_visible(False)
 
         if events:
             line_offsets = np.arange(1, len(events) + 1, dtype=float).tolist()
@@ -245,7 +306,6 @@ def _():
         ax.set_xlim(window_start - settings.x_pad_left, window_end + settings.x_pad_right)
         ax.tick_params(axis="x", bottom=False, labelbottom=False)
         ax.set_ylabel("")
-        ax.set_title(title or f"Raster Plot for Well {well_label}")
         ax.grid(False)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -399,7 +459,6 @@ def _(
         _baseline_channel_labels,
         _exposure_channel_labels,
     )
-
     return shared_channel_labels, well_labels
 
 
@@ -613,7 +672,6 @@ def _(
         well_label,
         exposure_plot_settings,
     )
-
     return baseline_fig, exposure_fig
 
 
