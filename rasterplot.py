@@ -257,11 +257,12 @@ def _():
             gridspec_kw={"height_ratios": [0.4, 1.0, 0.1], "hspace": 0.04},
         )
 
-        if len(spike_bin_edges) > 0 and len(spike_bin_counts) > 0:
-            trace_ax.step(
-                spike_bin_edges,
-                np.r_[spike_bin_counts, spike_bin_counts[-1]],
-                where="post",
+        if len(spike_bin_edges) > 1 and len(spike_bin_counts) > 0:
+            # Get the center point of each bin (ndarray `+`` does element-wise addition):
+            spike_bin_centers = 0.5 * (spike_bin_edges[:-1] + spike_bin_edges[1:])
+            trace_ax.plot(
+                spike_bin_centers,
+                spike_bin_counts,
                 color=settings.color,
                 linewidth=max(0.8, settings.line_width),
             )
