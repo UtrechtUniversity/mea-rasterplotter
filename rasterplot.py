@@ -36,6 +36,8 @@ def _():
         display_dpi: int
         line_length: float
         line_width: float
+        spike_count_bin_width_seconds: float
+        spike_count_trace_line_width: float
         color: str
         x_pad_left: float
         x_pad_right: float
@@ -222,6 +224,7 @@ def _():
             well_spikes,
             window_start,
             window_end,
+            settings.spike_count_bin_width_seconds,
         )
         return make_eventplot_figure(
             events,
@@ -264,7 +267,7 @@ def _():
                 spike_bin_centers,
                 spike_bin_counts,
                 color=settings.color,
-                linewidth=max(0.8, settings.line_width),
+                linewidth=settings.spike_count_trace_line_width,
             )
         trace_ax.set_ylim(bottom=0)
         trace_ax.set_title(title or f"Raster Plot for Well {well_label}")
@@ -552,6 +555,12 @@ def _(
     line_width = mo.ui.number(
         start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width (pt)"
     )
+    spike_count_bin_width_ms = mo.ui.number(
+        start=1, stop=1000, step=1, value=1, label="Spike count bin width (ms)"
+    )
+    spike_count_trace_line_width = mo.ui.number(
+        start=0.1, stop=4.0, step=0.1, value=0.2, label="Trace line width (pt)"
+    )
     x_pad_left = mo.ui.number(start=0, stop=5, step=0.05, value=1, label="X padding left (s)")
     x_pad_right = mo.ui.number(
         start=0, stop=5, step=0.05, value=0, label="X padding right (s)"
@@ -584,6 +593,8 @@ def _(
         selected_well,
         show_channel_labels,
         spike_color,
+        spike_count_bin_width_ms,
+        spike_count_trace_line_width,
         x_pad_left,
         x_pad_right,
     )
@@ -603,6 +614,8 @@ def _(
     line_width,
     show_channel_labels,
     spike_color,
+    spike_count_bin_width_ms,
+    spike_count_trace_line_width,
     x_pad_left,
     x_pad_right,
 ):
@@ -615,6 +628,8 @@ def _(
             display_dpi=int(display_dpi.value),
             line_length=float(line_length.value),
             line_width=float(line_width.value),
+            spike_count_bin_width_seconds=int(spike_count_bin_width_ms.value) / 1000.0,
+            spike_count_trace_line_width=float(spike_count_trace_line_width.value),
             color=spike_color.value,
             x_pad_left=float(x_pad_left.value),
             x_pad_right=float(x_pad_right.value),
@@ -700,23 +715,53 @@ def _(
     selected_well,
     show_channel_labels,
     spike_color,
+    spike_count_bin_width_ms,
+    spike_count_trace_line_width,
     x_pad_left,
 ):
+    figure_settings_column = mo.vstack(
+        [
+            mo.md("### Figure"),
+            figure_width,
+            figure_height,
+            display_dpi,
+            download_dpi,
+            x_pad_left,
+            spike_color,
+        ],
+        align="stretch",
+        gap=0.3,
+    )
+    raster_settings_column = mo.vstack(
+        [
+            mo.md("### Raster plot"),
+            line_length,
+            line_width,
+        ],
+        align="stretch",
+        gap=0.3,
+    )
+    trace_settings_column = mo.vstack(
+        [
+            mo.md("### Cumulative trace"),
+            spike_count_bin_width_ms,
+            spike_count_trace_line_width,
+        ],
+        align="stretch",
+        gap=0.3,
+    )
     shared_plot_settings = mo.accordion(
         {
-            "Plot Settings": mo.vstack(
+            "Plot Settings": mo.hstack(
                 [
-                    figure_width,
-                    figure_height,
-                    display_dpi,
-                    download_dpi,
-                    line_length,
-                    line_width,
-                    x_pad_left,
-                    spike_color,
+                    figure_settings_column,
+                    raster_settings_column,
+                    trace_settings_column,
                 ],
-                align="stretch",
-                gap=0.3,
+                widths="equal",
+                align="start",
+                wrap=True,
+                gap=1.0,
             )
         }
     )
