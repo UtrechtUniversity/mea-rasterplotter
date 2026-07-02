@@ -37,6 +37,9 @@ def _():
         line_length: float
         line_width: float
         spike_count_bin_width_seconds: float
+        # Display-only smoothing width for the PSTH; keep this separate from
+        # bin width so the histogram time grid stays explicit.
+        spike_count_filter_width_seconds: float
         spike_count_trace_line_width: float
         color: str
         x_pad_left: float
@@ -168,14 +171,40 @@ def _():
 
         return events
 
+    def gaussian_filter_counts(
+        counts: np.ndarray,
+        sigma_bins: float,
+    ) -> np.ndarray:
+        # A zero-width filter intentionally preserves the raw binned PSTH.
+        if sigma_bins <= 0:
+            return counts.astype(float, copy=False)
+
+        if counts.size == 0:
+            return counts.astype(float, copy=False)
+
+        # Truncate at +/- 4 sigma: enough support for a smooth Gaussian while
+        # keeping convolution cost bounded for long recordings.
+        radius = max(1, int(np.ceil(4.0 * sigma_bins)))
+        offsets = np.arange(-radius, radius + 1, dtype=float)
+        kernel = np.exp(-0.5 * (offsets / sigma_bins) ** 2)
+        # Normalize so filtering redistributes counts instead of rescaling them.
+        kernel /= kernel.sum()
+        # Pad explicitly so the output has exactly one value per histogram bin,
+        # even when the smoothing kernel is wider than the displayed window.
+        padded_counts = np.pad(counts.astype(float, copy=False), radius, mode="constant")
+        return np.convolve(padded_counts, kernel, mode="valid")
+
     def build_spike_count_trace(
         df: pl.DataFrame,
         window_start: float,
         window_end: float,
         bin_width_seconds: float = 0.001,
+        filter_width_seconds: float = 0.0,
     ) -> tuple[np.ndarray, np.ndarray]:
         if bin_width_seconds <= 0:
             raise ValueError("bin_width_seconds must be positive")
+        if filter_width_seconds < 0:
+            raise ValueError("filter_width_seconds must be non-negative")
 
         # Selected time span in seconds; clamp reversed/empty windows to a single bin:
         window_seconds = max(0.0, window_end - window_start)
@@ -193,11 +222,14 @@ def _():
             .drop_nulls()
             .to_numpy()
         )
-        # np.histogram gives one spike count sum per interval
-        spike_counts, _ = np.histogram(
+        # np.histogram gives one spike count sum per interval. The optional
+        # Gaussian filter smooths the display trace without changing the bin grid.
+        raw_spike_counts, _ = np.histogram(
             np.asarray(timestamps, dtype=float),
             bins=bin_edges,
         )
+        sigma_bins = filter_width_seconds / bin_width_seconds
+        spike_counts = gaussian_filter_counts(raw_spike_counts, sigma_bins)
         return bin_edges, spike_counts
 
     def filter_well_for_plot(
@@ -225,6 +257,7 @@ def _():
             window_start,
             window_end,
             settings.spike_count_bin_width_seconds,
+            settings.spike_count_filter_width_seconds,
         )
         return make_eventplot_figure(
             events,
@@ -556,10 +589,15 @@ def _(
         start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width (pt)"
     )
     spike_count_bin_width_ms = mo.ui.number(
-        start=1, stop=1000, step=1, value=1, label="Spike count bin width (ms)"
+        start=1, stop=1000, step=1, value=1, label="PSTH bin width (ms)"
+    )
+    # Bin width controls the PSTH time grid; filter width controls only the
+    # smoothing of the displayed population trace.
+    spike_count_filter_width_ms = mo.ui.number(
+        start=0, stop=1000, step=1, value=10, label="PSTH filter width (ms)"
     )
     spike_count_trace_line_width = mo.ui.number(
-        start=0.1, stop=4.0, step=0.1, value=0.2, label="Trace line width (pt)"
+        start=0.1, stop=4.0, step=0.1, value=0.2, label="PSTH line width (pt)"
     )
     x_pad_left = mo.ui.number(start=0, stop=5, step=0.05, value=1, label="X padding left (s)")
     x_pad_right = mo.ui.number(
@@ -594,6 +632,7 @@ def _(
         show_channel_labels,
         spike_color,
         spike_count_bin_width_ms,
+        spike_count_filter_width_ms,
         spike_count_trace_line_width,
         x_pad_left,
         x_pad_right,
@@ -615,6 +654,7 @@ def _(
     show_channel_labels,
     spike_color,
     spike_count_bin_width_ms,
+    spike_count_filter_width_ms,
     spike_count_trace_line_width,
     x_pad_left,
     x_pad_right,
@@ -629,6 +669,7 @@ def _(
             line_length=float(line_length.value),
             line_width=float(line_width.value),
             spike_count_bin_width_seconds=int(spike_count_bin_width_ms.value) / 1000.0,
+            spike_count_filter_width_seconds=float(spike_count_filter_width_ms.value) / 1000.0,
             spike_count_trace_line_width=float(spike_count_trace_line_width.value),
             color=spike_color.value,
             x_pad_left=float(x_pad_left.value),
@@ -716,6 +757,7 @@ def _(
     show_channel_labels,
     spike_color,
     spike_count_bin_width_ms,
+    spike_count_filter_width_ms,
     spike_count_trace_line_width,
     x_pad_left,
 ):
@@ -743,8 +785,9 @@ def _(
     )
     trace_settings_column = mo.vstack(
         [
-            mo.md("### Cumulative trace"),
+            mo.md("### Population spike time histogram"),
             spike_count_bin_width_ms,
+            spike_count_filter_width_ms,
             spike_count_trace_line_width,
         ],
         align="stretch",
