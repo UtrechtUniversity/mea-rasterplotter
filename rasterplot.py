@@ -37,7 +37,7 @@ def _():
         line_length: float
         line_width: float
         spike_count_bin_width_seconds: float
-        # Display-only Gaussian sigma for the PSTH; keep this separate from
+        # Display-only Gaussian sigma for the smoothed histogram; keep this separate from
         # bin width so the histogram time grid stays explicit.
         spike_count_gaussian_sigma_seconds: float
         spike_count_trace_line_width: float
@@ -175,7 +175,7 @@ def _():
         counts: np.ndarray,
         sigma_bins: float,
     ) -> np.ndarray:
-        # A zero-width filter intentionally preserves the raw binned PSTH.
+        # A zero-width filter intentionally preserves the raw binned histogram.
         if sigma_bins <= 0:
             return counts.astype(float, copy=False)
 
@@ -602,14 +602,14 @@ def _(
         start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width (pt)"
     )
     spike_count_bin_width_ms = mo.ui.number(
-        start=1, stop=1000, step=1, value=1, label="PSTH bin width (ms)"
+        start=1, stop=1000, step=1, value=1, label="Histogram bin width (ms)"
     )
     # Sigma controls only the acausal Gaussian smoothing of the displayed trace.
     spike_count_gaussian_sigma_ms = mo.ui.number(
         start=0, stop=1000, step=1, value=10, label="Gaussian standard deviation (ms)"
     )
     spike_count_trace_line_width = mo.ui.number(
-        start=0.1, stop=4.0, step=0.1, value=0.2, label="PSTH line width (pt)"
+        start=0.1, stop=4.0, step=0.1, value=0.2, label="Histogram line width (pt)"
     )
     x_pad_left = mo.ui.number(start=0, stop=5, step=0.05, value=1, label="X padding left (s)")
     x_pad_right = mo.ui.number(
