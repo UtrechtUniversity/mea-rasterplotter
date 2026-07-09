@@ -272,6 +272,7 @@ def _():
         if electrode_count <= 0:
             spike_rates = np.zeros_like(smoothed_spike_counts, dtype=float)
         else:
+            # Handle edge case where a clamped bin might not be exactly bin_width_seconds
             bin_durations = np.diff(bin_edges)
             spike_rates = smoothed_spike_counts / electrode_count / bin_durations
         return bin_edges, spike_rates
@@ -350,7 +351,6 @@ def _():
                 linewidth=settings.spike_count_trace_line_width,
             )
         trace_ax.set_ylim(bottom=0)
-        trace_ax.set_ylabel("Firing rate\n(Hz/electrode)", fontsize=8)
         trace_ax.set_title(title or f"Raster Plot for Well {well_label}")
         trace_ax.tick_params(axis="x", bottom=False, labelbottom=False)
         trace_ax.tick_params(axis="y", labelsize=8)
@@ -523,7 +523,7 @@ def _(load_spike_csv, mo, resolved_baseline_csv, resolved_exposure_csv):
     exposure_data = load_spike_csv(resolved_exposure_csv, "Exposure CSV")
     baseline_csv = resolved_baseline_csv
     exposure_csv = resolved_exposure_csv
-    return baseline_csv, baseline_data, exposure_csv, exposure_data
+    return baseline_data, exposure_data
 
 
 @app.cell
@@ -996,9 +996,7 @@ def _(mo):
 
 @app.cell
 def _(
-    baseline_csv,
     baseline_well_data,
-    exposure_csv,
     exposure_well_data,
     mo,
     shared_channel_labels,
@@ -1010,10 +1008,7 @@ def _(
         "\n".join(
             [
                 "### Data Summary",
-                f"- Baseline CSV: `{baseline_csv}`",
-                f"- Exposure CSV: `{exposure_csv}`",
                 f"- Available wells across both files: `{len(well_labels)}`",
-                f"- Selected well: `{selected_well_label}`",
                 f"- Baseline spikes in current view: `{baseline_well_data.height}`",
                 f"- Exposure spikes in current view: `{exposure_well_data.height}`",
                 f"- Shared channels shown: `{len(shared_channel_labels)}`",
@@ -1047,7 +1042,7 @@ def _(
         stop=1000,
         step=1,
         value=get_gaussian_sigma_ms(),
-        label="Gaussian standard deviation (ms)",
+        label="Gaussian Std Dev (ms)",
         disabled=_use_exponential,
         on_change=set_gaussian_sigma_ms,
     )
