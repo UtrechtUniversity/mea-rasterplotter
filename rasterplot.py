@@ -37,6 +37,8 @@ def _():
         line_length: float
         line_width: float
         spike_count_bin_width_seconds: float
+        spike_count_smoothing_method: str
+        spike_count_exponential_tau_seconds: float
         # Display-only Gaussian sigma for the smoothed histogram; keep this separate from
         # bin width so the histogram time grid stays explicit.
         spike_count_gaussian_sigma_seconds: float
@@ -196,16 +198,43 @@ def _():
         padded_counts = np.pad(counts.astype(float, copy=False), pad_radius, mode="constant")
         return np.convolve(padded_counts, kernel, mode="valid")
 
+    def exponential_filter_counts(
+        counts: np.ndarray,
+        tau_bins: float,
+    ) -> np.ndarray:
+        # A zero time constant intentionally preserves the raw binned histogram.
+        if tau_bins <= 0:
+            return counts.astype(float, copy=False)
+
+        if counts.size == 0:
+            return counts.astype(float, copy=False)
+
+        # Causal, normalized one-pole filter with a zero-valued pre-window state.
+        decay = np.exp(-1.0 / tau_bins)
+        filtered = np.empty(counts.size, dtype=float)
+        previous = 0.0
+        for index, count in enumerate(counts):
+            previous = (1.0 - decay) * count + decay * previous
+            filtered[index] = previous
+        return filtered
+
     def build_spike_rate_trace(
         df: pl.DataFrame,
         window_start: float,
         window_end: float,
         electrode_count: int,
         bin_width_seconds: float = 0.001,
-        gaussian_sigma_seconds: float = 0.0,
+        *,
+        smoothing_method: str = "exponential",
+        exponential_tau_seconds: float = 0.010,
+        gaussian_sigma_seconds: float = 0.010,
     ) -> tuple[np.ndarray, np.ndarray]:
         if bin_width_seconds <= 0:
             raise ValueError("bin_width_seconds must be positive")
+        if smoothing_method not in {"exponential", "gaussian"}:
+            raise ValueError(f"Unknown smoothing method: {smoothing_method!r}")
+        if exponential_tau_seconds < 0:
+            raise ValueError("exponential_tau_seconds must be non-negative")
         if gaussian_sigma_seconds < 0:
             raise ValueError("gaussian_sigma_seconds must be non-negative")
 
@@ -225,14 +254,18 @@ def _():
             .drop_nulls()
             .to_numpy()
         )
-        # np.histogram gives one spike count sum per interval. The optional
-        # Gaussian filter smooths the display trace without changing the bin grid.
+        # np.histogram gives one spike count sum per interval. Smoothing changes
+        # only the display trace and preserves the explicit histogram time grid.
         raw_spike_counts, _ = np.histogram(
             np.asarray(timestamps, dtype=float),
             bins=bin_edges,
         )
-        sigma_bins = gaussian_sigma_seconds / bin_width_seconds
-        smoothed_spike_counts = gaussian_filter_counts(raw_spike_counts, sigma_bins)
+        if smoothing_method == "exponential":
+            tau_bins = exponential_tau_seconds / bin_width_seconds
+            smoothed_spike_counts = exponential_filter_counts(raw_spike_counts, tau_bins)
+        else:
+            sigma_bins = gaussian_sigma_seconds / bin_width_seconds
+            smoothed_spike_counts = gaussian_filter_counts(raw_spike_counts, sigma_bins)
 
         # Convert area-preserved counts to firing rate per electrode. The
         # shared channel list is the electrode denominator used in both plots.
@@ -264,12 +297,14 @@ def _():
         window_end = max(settings.start_time, settings.end_time)
         events = build_event_series(well_spikes, channel_labels)
         spike_bin_edges, spike_rates = build_spike_rate_trace(
-            well_spikes,
-            window_start,
-            window_end,
-            len(channel_labels),
-            settings.spike_count_bin_width_seconds,
-            settings.spike_count_gaussian_sigma_seconds,
+            df=well_spikes,
+            window_start=window_start,
+            window_end=window_end,
+            electrode_count=len(channel_labels),
+            bin_width_seconds=settings.spike_count_bin_width_seconds,
+            smoothing_method=settings.spike_count_smoothing_method,
+            exponential_tau_seconds=settings.spike_count_exponential_tau_seconds,
+            gaussian_sigma_seconds=settings.spike_count_gaussian_sigma_seconds,
         )
         return make_eventplot_figure(
             events,
@@ -604,10 +639,13 @@ def _(
     spike_count_bin_width_ms = mo.ui.number(
         start=1, stop=1000, step=1, value=1, label="Histogram bin width (ms)"
     )
-    # Sigma controls only the acausal Gaussian smoothing of the displayed trace.
-    spike_count_gaussian_sigma_ms = mo.ui.number(
-        start=0, stop=1000, step=1, value=10, label="Gaussian standard deviation (ms)"
+    spike_count_smoothing_method = mo.ui.dropdown(
+        options={"Exponential": "exponential", "Gaussian": "gaussian"},
+        value="Exponential",
+        label="Smoothing method",
     )
+    get_exponential_tau_ms, set_exponential_tau_ms = mo.state(10)
+    get_gaussian_sigma_ms, set_gaussian_sigma_ms = mo.state(10)
     spike_count_trace_line_width = mo.ui.number(
         start=0.1, stop=4.0, step=0.1, value=0.2, label="Histogram line width (pt)"
     )
@@ -638,13 +676,17 @@ def _(
         exposure_start_time,
         figure_height,
         figure_width,
+        get_exponential_tau_ms,
+        get_gaussian_sigma_ms,
         line_length,
         line_width,
         selected_well,
+        set_exponential_tau_ms,
+        set_gaussian_sigma_ms,
         show_channel_labels,
         spike_color,
         spike_count_bin_width_ms,
-        spike_count_gaussian_sigma_ms,
+        spike_count_smoothing_method,
         spike_count_trace_line_width,
         x_pad_left,
         x_pad_right,
@@ -666,7 +708,9 @@ def _(
     show_channel_labels,
     spike_color,
     spike_count_bin_width_ms,
+    spike_count_exponential_tau_ms,
     spike_count_gaussian_sigma_ms,
+    spike_count_smoothing_method,
     spike_count_trace_line_width,
     x_pad_left,
     x_pad_right,
@@ -681,6 +725,8 @@ def _(
             line_length=float(line_length.value),
             line_width=float(line_width.value),
             spike_count_bin_width_seconds=int(spike_count_bin_width_ms.value) / 1000.0,
+            spike_count_smoothing_method=spike_count_smoothing_method.value,
+            spike_count_exponential_tau_seconds=float(spike_count_exponential_tau_ms.value) / 1000.0,
             spike_count_gaussian_sigma_seconds=float(spike_count_gaussian_sigma_ms.value) / 1000.0,
             spike_count_trace_line_width=float(spike_count_trace_line_width.value),
             color=spike_color.value,
@@ -769,7 +815,9 @@ def _(
     show_channel_labels,
     spike_color,
     spike_count_bin_width_ms,
+    spike_count_exponential_tau_ms,
     spike_count_gaussian_sigma_ms,
+    spike_count_smoothing_method,
     spike_count_trace_line_width,
     x_pad_left,
 ):
@@ -799,6 +847,8 @@ def _(
         [
             mo.md("### Population spike time histogram"),
             spike_count_bin_width_ms,
+            spike_count_smoothing_method,
+            spike_count_exponential_tau_ms,
             spike_count_gaussian_sigma_ms,
             spike_count_trace_line_width,
         ],
@@ -971,6 +1021,37 @@ def _(
         )
     )
     return
+
+
+@app.cell
+def _(
+    get_exponential_tau_ms,
+    get_gaussian_sigma_ms,
+    mo,
+    set_exponential_tau_ms,
+    set_gaussian_sigma_ms,
+    spike_count_smoothing_method,
+):
+    _use_exponential = spike_count_smoothing_method.value == "exponential"
+    spike_count_exponential_tau_ms = mo.ui.number(
+        start=0,
+        stop=1000,
+        step=1,
+        value=get_exponential_tau_ms(),
+        label="Exponential time constant (ms)",
+        disabled=not _use_exponential,
+        on_change=set_exponential_tau_ms,
+    )
+    spike_count_gaussian_sigma_ms = mo.ui.number(
+        start=0,
+        stop=1000,
+        step=1,
+        value=get_gaussian_sigma_ms(),
+        label="Gaussian standard deviation (ms)",
+        disabled=_use_exponential,
+        on_change=set_gaussian_sigma_ms,
+    )
+    return spike_count_exponential_tau_ms, spike_count_gaussian_sigma_ms
 
 
 if __name__ == "__main__":
