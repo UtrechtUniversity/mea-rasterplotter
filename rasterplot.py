@@ -209,14 +209,21 @@ def _():
         if counts.size == 0:
             return counts.astype(float, copy=False)
 
-        # Causal, normalized one-pole filter with a zero-valued pre-window state.
-        decay = np.exp(-1.0 / tau_bins)
-        filtered = np.empty(counts.size, dtype=float)
-        previous = 0.0
-        for index, count in enumerate(counts):
-            previous = (1.0 - decay) * count + decay * previous
-            filtered[index] = previous
-        return filtered
+        # Centered/acausal Laplace kernel sampled on the histogram grid;
+        # truncated at +/- 4 tau. This cutoff omits exp(-4) (about 1.8%) of the
+        # ideal continuous kernel's mass before the finite kernel is normalized.
+        radius = int(np.ceil(4.0 * tau_bins))
+        offsets = np.arange(-radius, radius + 1, dtype=float)
+        offsets = offsets[np.abs(offsets) <= 4.0 * tau_bins]
+        kernel = np.exp(-np.abs(offsets) / tau_bins)
+        # Normalize so filtering redistributes counts instead of rescaling them.
+        kernel /= kernel.sum()
+        # Match Gaussian boundary handling and preserve one output per input bin.
+        pad_radius = int(np.max(np.abs(offsets)))
+        padded_counts = np.pad(
+            counts.astype(float, copy=False), pad_radius, mode="constant"
+        )
+        return np.convolve(padded_counts, kernel, mode="valid")
 
     def build_spike_rate_trace(
         df: pl.DataFrame,
