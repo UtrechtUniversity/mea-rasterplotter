@@ -82,3 +82,10 @@ Marimo will open in a browser window.
 # Install optional dependencies
 uv sync --extra marimo-ai
 ```
+
+```sh
+# Upgrade uv.lock dependencies
+uv lock --upgrade
+# Export updates to requirements.txt
+uv export --format requirements.txt --output-file requirements.txt
+```
