@@ -647,8 +647,8 @@ def _(
         start=1, stop=1000, step=1, value=1, label="Histogram bin width (ms)"
     )
     spike_count_smoothing_method = mo.ui.dropdown(
-        options={"Exponential": "exponential", "Gaussian": "gaussian"},
-        value="Exponential",
+        options={"Exponential decay": "exponential", "Gaussian": "gaussian"},
+        value="Exponential decay",
         label="Smoothing method",
     )
     get_exponential_tau_ms, set_exponential_tau_ms = mo.state(10)
