@@ -822,9 +822,8 @@ def _(
     show_channel_labels,
     spike_color,
     spike_count_bin_width_ms,
-    spike_count_exponential_tau_ms,
-    spike_count_gaussian_sigma_ms,
     spike_count_smoothing_method,
+    spike_count_smoothing_parameter,
     spike_count_trace_line_width,
     x_pad_left,
 ):
@@ -855,8 +854,7 @@ def _(
             mo.md("### Population spike time histogram"),
             spike_count_bin_width_ms,
             spike_count_smoothing_method,
-            spike_count_exponential_tau_ms,
-            spike_count_gaussian_sigma_ms,
+            spike_count_smoothing_parameter,
             spike_count_trace_line_width,
         ],
         align="stretch",
@@ -1053,7 +1051,16 @@ def _(
         disabled=_use_exponential,
         on_change=set_gaussian_sigma_ms,
     )
-    return spike_count_exponential_tau_ms, spike_count_gaussian_sigma_ms
+    spike_count_smoothing_parameter = (
+        spike_count_exponential_tau_ms
+        if _use_exponential
+        else spike_count_gaussian_sigma_ms
+    )
+    return (
+        spike_count_exponential_tau_ms,
+        spike_count_gaussian_sigma_ms,
+        spike_count_smoothing_parameter,
+    )
 
 
 if __name__ == "__main__":
