@@ -722,7 +722,7 @@ def _(
     x_pad_left,
     x_pad_right,
 ):
-    def make_plot_settings(start_widget, end_widget) -> PlotSettings:
+    def make_plot_settings(start_widget, end_widget):
         return PlotSettings(
             start_time=float(start_widget.value),
             end_time=float(end_widget.value),
