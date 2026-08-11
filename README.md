@@ -21,6 +21,8 @@ This project is incomplete and is in development. The notebook UIs are still a l
 
 ### Download
 
+Open a console or Windows Command Prompt at the desired location and clone the repository:
+
 ```sh
 # Clone mea-rasterplotter
 git clone --recurse-submodules https://github.com/UtrechtUniversity/mea-rasterplotter.git
@@ -50,11 +52,13 @@ uv sync
 Alternatively, use pip (included with Python):
 
 ```sh
+# Navigate inside the repository dir:
+cd mea-rasterplotter
 # Example for Windows:
-# Install and activate an environment
+# Install and activate a Python environment:
 py -m venv .venv
 .venv\Scripts\activate
-# Install the dependencies
+# Install the dependencies in the environment:
 py -m pip install -r requirements.txt
 ```
 
