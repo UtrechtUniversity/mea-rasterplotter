@@ -196,6 +196,8 @@ def _():
 
         # Reproduce MATLAB conv(counts, kernel, "same") for an even kernel:
         # its center lies half a sample before the current histogram-bin center.
+        # np.convolve reverses the kernel during convolution: with 499 zeros
+        # on the left, counts[i] multiplies kernel[500] at output[i].
         pad_left = (SMOOTHING_KERNEL_SAMPLE_COUNT - 1) // 2
         pad_right = SMOOTHING_KERNEL_SAMPLE_COUNT - 1 - pad_left
         padded_counts = np.pad(
