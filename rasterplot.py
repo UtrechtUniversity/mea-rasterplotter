@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.10"
+__generated_with = "0.23.15"
 app = marimo.App(width="full")
 
 
@@ -27,6 +27,9 @@ def _():
         "Well_Label",
         "Timestamp",
     }
+    PSTH_BIN_WIDTH_SECONDS = 0.001
+    SMOOTHING_KERNEL_SAMPLE_COUNT = 1000
+
     @dataclass
     class PlotSettings:
         start_time: float
@@ -36,12 +39,9 @@ def _():
         display_dpi: int
         line_length: float
         line_width: float
-        spike_count_bin_width_seconds: float
         spike_count_smoothing_method: str
         spike_count_exponential_tau_seconds: float
-        # Display-only Gaussian sigma for the smoothed histogram; keep this separate from
-        # bin width so the histogram time grid stays explicit.
-        spike_count_gaussian_sigma_seconds: float
+        spike_count_gaussian_width_factor: float
         spike_count_trace_line_width: float
         color: str
         x_pad_left: float
@@ -175,75 +175,77 @@ def _():
 
     def gaussian_filter_counts(
         counts: np.ndarray,
-        sigma_bins: float,
+        width_factor: float,
     ) -> np.ndarray:
-        # A zero-width filter intentionally preserves the raw binned histogram.
-        if sigma_bins <= 0:
-            return counts.astype(float, copy=False)
+        if width_factor <= 0:
+            raise ValueError("width_factor must be positive")
 
         if counts.size == 0:
             return counts.astype(float, copy=False)
 
-        # Centered/acausal Gaussian sampled on the histogram grid and truncated
-        # at +/- 4 sigma. Very small sigmas collapse to the center bin only.
-        radius = int(np.ceil(4.0 * sigma_bins))
-        offsets = np.arange(-radius, radius + 1, dtype=float)
-        offsets = offsets[np.abs(offsets) <= 4.0 * sigma_bins]
+        # Match MATLAB gausswin(1000, alpha): the even-length window is sampled
+        # symmetrically around the half-sample point. At alpha=2.5 its standard
+        # deviation is 999 / (2 * 2.5) = 199.8 bins (199.8 ms on the fixed grid).
+        offsets = (
+            np.arange(SMOOTHING_KERNEL_SAMPLE_COUNT, dtype=float)
+            - (SMOOTHING_KERNEL_SAMPLE_COUNT - 1) / 2.0
+        )
+        sigma_bins = (SMOOTHING_KERNEL_SAMPLE_COUNT - 1) / (2.0 * width_factor)
         kernel = np.exp(-0.5 * (offsets / sigma_bins) ** 2)
-        # Normalize so filtering redistributes counts instead of rescaling them.
         kernel /= kernel.sum()
-        # Pad explicitly so the output has exactly one value per histogram bin,
-        # even when the smoothing kernel is wider than the displayed window.
-        pad_radius = int(np.max(np.abs(offsets)))
-        padded_counts = np.pad(counts.astype(float, copy=False), pad_radius, mode="constant")
+
+        # Reproduce MATLAB conv(counts, kernel, "same") for an even kernel:
+        # its center lies half a sample before the current histogram-bin center.
+        pad_left = (SMOOTHING_KERNEL_SAMPLE_COUNT - 1) // 2
+        pad_right = SMOOTHING_KERNEL_SAMPLE_COUNT - 1 - pad_left
+        padded_counts = np.pad(
+            counts.astype(float, copy=False),
+            (pad_left, pad_right),
+            mode="constant",
+        )
         return np.convolve(padded_counts, kernel, mode="valid")
 
     def exponential_filter_counts(
         counts: np.ndarray,
         tau_bins: float,
     ) -> np.ndarray:
+        if tau_bins < 0:
+            raise ValueError("tau_bins must be non-negative")
+
         # A zero time constant intentionally preserves the raw binned histogram.
-        if tau_bins <= 0:
+        if tau_bins == 0 or counts.size == 0:
             return counts.astype(float, copy=False)
 
-        if counts.size == 0:
-            return counts.astype(float, copy=False)
-
-        # Centered/acausal Laplace kernel sampled on the histogram grid;
-        # truncated at +/- 4 tau. This cutoff omits exp(-4) (about 1.8%) of the
-        # ideal continuous kernel's mass before the finite kernel is normalized.
-        radius = int(np.ceil(4.0 * tau_bins))
-        offsets = np.arange(-radius, radius + 1, dtype=float)
-        offsets = offsets[np.abs(offsets) <= 4.0 * tau_bins]
-        kernel = np.exp(-np.abs(offsets) / tau_bins)
-        # Normalize so filtering redistributes counts instead of rescaling them.
+        # One-sided causal exponential with 1000 samples of support. At the fixed
+        # 1 ms PSTH grid, the default 100 ms time constant gives one second of support.
+        offsets = np.arange(SMOOTHING_KERNEL_SAMPLE_COUNT, dtype=float)
+        kernel = np.exp(-offsets / tau_bins)
         kernel /= kernel.sum()
-        # Match Gaussian boundary handling and preserve one output per input bin.
-        pad_radius = int(np.max(np.abs(offsets)))
-        padded_counts = np.pad(
-            counts.astype(float, copy=False), pad_radius, mode="constant"
-        )
-        return np.convolve(padded_counts, kernel, mode="valid")
+
+        # Full convolution followed by a left-aligned crop is causal: samples before
+        # the displayed window are treated as zero and no future counts affect the trace.
+        return np.convolve(
+            counts.astype(float, copy=False), kernel, mode="full"
+        )[: counts.size]
 
     def build_spike_rate_trace(
         df: pl.DataFrame,
         window_start: float,
         window_end: float,
         electrode_count: int,
-        bin_width_seconds: float = 0.001,
         *,
         smoothing_method: str = "exponential",
-        exponential_tau_seconds: float = 0.010,
-        gaussian_sigma_seconds: float = 0.010,
+        exponential_tau_seconds: float = 0.100,
+        gaussian_width_factor: float = 2.5,
     ) -> tuple[np.ndarray, np.ndarray]:
-        if bin_width_seconds <= 0:
-            raise ValueError("bin_width_seconds must be positive")
         if smoothing_method not in {"exponential", "gaussian"}:
             raise ValueError(f"Unknown smoothing method: {smoothing_method!r}")
         if exponential_tau_seconds < 0:
             raise ValueError("exponential_tau_seconds must be non-negative")
-        if gaussian_sigma_seconds < 0:
-            raise ValueError("gaussian_sigma_seconds must be non-negative")
+        if gaussian_width_factor <= 0:
+            raise ValueError("gaussian_width_factor must be positive")
+
+        bin_width_seconds = PSTH_BIN_WIDTH_SECONDS
 
         # Selected time span in seconds; clamp reversed/empty windows to a single bin:
         window_seconds = max(0.0, window_end - window_start)
@@ -271,8 +273,9 @@ def _():
             tau_bins = exponential_tau_seconds / bin_width_seconds
             smoothed_spike_counts = exponential_filter_counts(raw_spike_counts, tau_bins)
         else:
-            sigma_bins = gaussian_sigma_seconds / bin_width_seconds
-            smoothed_spike_counts = gaussian_filter_counts(raw_spike_counts, sigma_bins)
+            smoothed_spike_counts = gaussian_filter_counts(
+                raw_spike_counts, gaussian_width_factor
+            )
 
         # Convert area-preserved counts to firing rate per electrode. The
         # shared channel list is the electrode denominator used in both plots.
@@ -309,10 +312,9 @@ def _():
             window_start=window_start,
             window_end=window_end,
             electrode_count=len(channel_labels),
-            bin_width_seconds=settings.spike_count_bin_width_seconds,
             smoothing_method=settings.spike_count_smoothing_method,
             exponential_tau_seconds=settings.spike_count_exponential_tau_seconds,
-            gaussian_sigma_seconds=settings.spike_count_gaussian_sigma_seconds,
+            gaussian_width_factor=settings.spike_count_gaussian_width_factor,
         )
         return make_eventplot_figure(
             events,
@@ -644,15 +646,20 @@ def _(
         start=0.1, stop=4.0, step=0.1, value=0.6, label="Spike line width (pt)"
     )
     spike_count_bin_width_ms = mo.ui.number(
-        start=1, stop=1000, step=1, value=1, label="Histogram bin width (ms)"
+        start=1,
+        stop=1000,
+        step=1,
+        value=1,
+        label="Histogram bin width (ms, fixed)",
+        disabled=True,
     )
     spike_count_smoothing_method = mo.ui.dropdown(
         options={"Exponential decay": "exponential", "Gaussian": "gaussian"},
         value="Exponential decay",
         label="Smoothing method",
     )
-    get_exponential_tau_ms, set_exponential_tau_ms = mo.state(10)
-    get_gaussian_sigma_ms, set_gaussian_sigma_ms = mo.state(10)
+    get_exponential_tau_ms, set_exponential_tau_ms = mo.state(100)
+    get_gaussian_width_factor, set_gaussian_width_factor = mo.state(2.5)
     spike_count_trace_line_width = mo.ui.number(
         start=0.1, stop=4.0, step=0.1, value=0.2, label="Histogram line width (pt)"
     )
@@ -684,12 +691,12 @@ def _(
         figure_height,
         figure_width,
         get_exponential_tau_ms,
-        get_gaussian_sigma_ms,
+        get_gaussian_width_factor,
         line_length,
         line_width,
         selected_well,
         set_exponential_tau_ms,
-        set_gaussian_sigma_ms,
+        set_gaussian_width_factor,
         show_channel_labels,
         spike_color,
         spike_count_bin_width_ms,
@@ -714,9 +721,8 @@ def _(
     line_width,
     show_channel_labels,
     spike_color,
-    spike_count_bin_width_ms,
     spike_count_exponential_tau_ms,
-    spike_count_gaussian_sigma_ms,
+    spike_count_gaussian_width_factor,
     spike_count_smoothing_method,
     spike_count_trace_line_width,
     x_pad_left,
@@ -731,10 +737,9 @@ def _(
             display_dpi=int(display_dpi.value),
             line_length=float(line_length.value),
             line_width=float(line_width.value),
-            spike_count_bin_width_seconds=int(spike_count_bin_width_ms.value) / 1000.0,
             spike_count_smoothing_method=spike_count_smoothing_method.value,
             spike_count_exponential_tau_seconds=float(spike_count_exponential_tau_ms.value) / 1000.0,
-            spike_count_gaussian_sigma_seconds=float(spike_count_gaussian_sigma_ms.value) / 1000.0,
+            spike_count_gaussian_width_factor=float(spike_count_gaussian_width_factor.value),
             spike_count_trace_line_width=float(spike_count_trace_line_width.value),
             color=spike_color.value,
             x_pad_left=float(x_pad_left.value),
@@ -1026,10 +1031,10 @@ def _(
 @app.cell
 def _(
     get_exponential_tau_ms,
-    get_gaussian_sigma_ms,
+    get_gaussian_width_factor,
     mo,
     set_exponential_tau_ms,
-    set_gaussian_sigma_ms,
+    set_gaussian_width_factor,
     spike_count_smoothing_method,
 ):
     _use_exponential = spike_count_smoothing_method.value == "exponential"
@@ -1042,23 +1047,24 @@ def _(
         disabled=not _use_exponential,
         on_change=set_exponential_tau_ms,
     )
-    spike_count_gaussian_sigma_ms = mo.ui.number(
-        start=0,
-        stop=1000,
-        step=1,
-        value=get_gaussian_sigma_ms(),
-        label="Gaussian Std Dev (ms)",
+    spike_count_gaussian_width_factor = mo.ui.number(
+        start=0.1,
+        stop=100,
+        step=0.1,
+        value=get_gaussian_width_factor(),
+        label="Gaussian width factor",
         disabled=_use_exponential,
-        on_change=set_gaussian_sigma_ms,
+        on_change=set_gaussian_width_factor,
     )
     spike_count_smoothing_parameter = (
         spike_count_exponential_tau_ms
         if _use_exponential
-        else spike_count_gaussian_sigma_ms
+        else spike_count_gaussian_width_factor
     )
+
     return (
         spike_count_exponential_tau_ms,
-        spike_count_gaussian_sigma_ms,
+        spike_count_gaussian_width_factor,
         spike_count_smoothing_parameter,
     )
 
