@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.15"
+__generated_with = "0.23.16"
 app = marimo.App(width="full")
 
 
@@ -852,6 +852,7 @@ def _(
             mo.md("### Raster plot"),
             line_length,
             line_width,
+            show_channel_labels
         ],
         align="stretch",
         gap=0.3,
@@ -911,7 +912,6 @@ def _(
         shared_plot_settings,
         mo.md("### Plot Controls"),
         selected_well,
-        show_channel_labels,
         time_window_controls,
     ]
     mo.vstack(
@@ -1063,7 +1063,6 @@ def _(
         if _use_exponential
         else spike_count_gaussian_width_factor
     )
-
     return (
         spike_count_exponential_tau_ms,
         spike_count_gaussian_width_factor,
