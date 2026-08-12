@@ -62,6 +62,17 @@ py -m venv .venv
 py -m pip install -r requirements.txt
 ```
 
+### Updates
+
+To get updates, fetch the latest changes with Git, and install dependencies if they were updated:
+
+```sh
+cd /path/to/mea-rasterplotter
+git pull # The default branch is develop
+.venv\Scripts\activate
+py -m pip install -r requirements.txt
+```
+
 ## Use
 
 The functionality can be used via two notebooks:
