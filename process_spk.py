@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.23.16"
 app = marimo.App(width="medium")
 
 
@@ -334,11 +334,9 @@ def _(Path):
     matlab_wrapper_script = notebook_dir / "extract_spk_with_axisfile_matlab.m"
     octave_wrapper_script = notebook_dir / "extract_spk_with_axisfile_octave.m"
     loader_dir = notebook_dir / "vendor" / "AxionFileLoader" / "AxionFileLoader"
-    default_spk_path = (
-        notebook_dir
-    )
+    initial_spk_dir = notebook_dir
     return (
-        default_spk_path,
+        initial_spk_dir,
         loader_dir,
         matlab_wrapper_script,
         octave_wrapper_script,
@@ -346,8 +344,8 @@ def _(Path):
 
 
 @app.cell
-def _(default_spk_path, mo):
-    show_spk_picker, set_show_spk_picker = mo.state(not default_spk_path.is_file())
+def _(mo):
+    show_spk_picker, set_show_spk_picker = mo.state(True)
     return set_show_spk_picker, show_spk_picker
 
 
@@ -389,7 +387,7 @@ def _(selected_runtime):
 
 @app.cell
 def _(
-    default_spk_path,
+    initial_spk_dir,
     mo,
     selected_runtime_value,
     set_selected_runtime,
@@ -408,7 +406,7 @@ def _(
         on_click=lambda _: set_show_spk_picker(lambda current: not current),
     )
     spk_path_picker = mo.ui.file_browser(
-        initial_path=default_spk_path.parent,
+        initial_path=initial_spk_dir,
         filetypes=[".spk"],
         multiple=False,
         label="SPK file",
@@ -423,9 +421,10 @@ def _(
 
 
 @app.cell
-def _(default_spk_path, spk_path_picker):
-    spk_path = spk_path_picker.path(0) or default_spk_path
-    output_csv_path = spk_path.with_suffix(".csv")
+def _(Path, spk_path_picker):
+    selected_spk_path = spk_path_picker.path(0)
+    spk_path = Path(selected_spk_path) if selected_spk_path else None
+    output_csv_path = spk_path.with_suffix(".csv") if spk_path else None
     return output_csv_path, spk_path
 
 
@@ -481,7 +480,22 @@ def _(
         if selected_runtime_value == "matlab"
         else octave_wrapper_script
     )
-    active_log_path = build_runtime_log_path(spk_path, selected_runtime_value)
+    active_log_path = (
+        build_runtime_log_path(spk_path, selected_runtime_value)
+        if spk_path is not None
+        else None
+    )
+    can_extract = (
+        spk_path is not None
+        and spk_path.is_file()
+        and spk_path.suffix.lower() == ".spk"
+        and not runtime_blockers
+    )
+    extract_spikes_button = mo.ui.run_button(
+        label="Extract spike timings to CSV",
+        disabled=not can_extract,
+        kind="success",
+    )
 
     status = [
         f"- Selected runtime: `{selected_runtime_value}`",
@@ -514,15 +528,17 @@ def _(
         f"- MATLAB wrapper: `{matlab_wrapper_script}`",
         f"- Octave wrapper: `{octave_wrapper_script}`",
         f"- Active wrapper: `{active_wrapper_script}`",
-        f"- Active log file: `{active_log_path}`",
+        (
+            f"- Active log file: `{active_log_path}`"
+            if active_log_path is not None
+            else "- Active log file: not available until an SPK file is selected"
+        ),
         f"- Loader directory: `{loader_dir}`",
         (
             "- Octave loader compatibility: detected"
             if octave_loader_compatible
             else "- Octave loader compatibility: not detected in current vendor checkout"
         ),
-        f"- Input .spk file: `{spk_path}`",
-        f"- Output .csv file: `{output_csv_path}`",
     ]
 
     blocks = [mo.md("## Configuration\n" + "\n".join(status))]
@@ -541,15 +557,30 @@ def _(
             mo.md("**Warnings**\n" + "\n".join(f"- {warning}" for warning in config_warnings))
         )
 
-    controls = [matlab_runtime_button, octave_runtime_button, spk_path_toggle]
+    blocks.append(mo.hstack([matlab_runtime_button, octave_runtime_button], align="start"))
+    file_controls = [spk_path_toggle]
     if show_spk_picker():
-        controls.append(spk_path_picker)
+        file_controls.append(spk_path_picker)
+    blocks.append(mo.vstack(file_controls, align="stretch", gap=0.3))
 
-    blocks.append(mo.hstack(controls, align="start"))
-    mo.vstack(blocks)
+    if spk_path is None:
+        displayed_paths = (
+            "**Input .spk file:** None selected\n\n"
+            "**Output .csv file:** Not available"
+        )
+    else:
+        displayed_paths = (
+            f"**Input .spk file:** `{spk_path}`\n\n"
+            f"**Output .csv file:** `{output_csv_path}`"
+        )
+    blocks.append(mo.md(displayed_paths))
+    blocks.append(extract_spikes_button)
+
+    mo.vstack(blocks, align="stretch", gap=0.5)
     return (
         active_log_path,
         active_wrapper_script,
+        extract_spikes_button,
         matlab_bin,
         matlab_env_overrides,
         octave_bin,
@@ -561,6 +592,7 @@ def _(
 def _(
     active_log_path,
     active_wrapper_script,
+    extract_spikes_button,
     loader_dir,
     matlab_bin,
     matlab_env_overrides,
@@ -573,10 +605,18 @@ def _(
     selected_runtime_value,
     spk_path,
 ):
-    if runtime_blockers:
+    mo.stop(not extract_spikes_button.value)
+
+    if spk_path is None or active_log_path is None:
+        message = (
+            "## Conversion Result\n"
+            "- Select a valid .spk file before starting extraction."
+        )
+    elif runtime_blockers:
         message = (
             "## Conversion Result\n"
             + "\n".join(f"- {warning}" for warning in runtime_blockers)
+            + f"\n- Expected log file: `{active_log_path}`\n"
         )
     else:
         try:
@@ -618,10 +658,8 @@ def _(
             if log_tail:
                 message += f"### Log Tail\n```text\n{log_tail}\n```\n"
 
-    if runtime_blockers:
-        message += f"\n- Expected log file: `{active_log_path}`\n"
-
     mo.md(message)
+    return
 
 
 if __name__ == "__main__":
