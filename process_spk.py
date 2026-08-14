@@ -429,6 +429,12 @@ def _(Path, spk_path_picker):
 
 
 @app.cell
+def _(mo):
+    extraction_job, set_extraction_job = mo.state(None)
+    return extraction_job, set_extraction_job
+
+
+@app.cell
 def _(
     build_runtime_log_path,
     get_runtime_messages,
@@ -490,11 +496,6 @@ def _(
         and spk_path.is_file()
         and spk_path.suffix.lower() == ".spk"
         and not runtime_blockers
-    )
-    extract_spikes_button = mo.ui.run_button(
-        label="Extract spike timings to CSV",
-        disabled=not can_extract,
-        kind="success",
     )
 
     status = [
@@ -574,17 +575,15 @@ def _(
             f"**Output .csv file:** `{output_csv_path}`"
         )
     blocks.append(mo.md(displayed_paths))
-    blocks.append(extract_spikes_button)
 
     mo.vstack(blocks, align="stretch", gap=0.5)
     return (
         active_log_path,
         active_wrapper_script,
-        extract_spikes_button,
+        can_extract,
         matlab_bin,
         matlab_env_overrides,
         octave_bin,
-        runtime_blockers,
     )
 
 
@@ -592,77 +591,141 @@ def _(
 def _(
     active_log_path,
     active_wrapper_script,
-    extract_spikes_button,
+    can_extract,
+    extraction_job,
     loader_dir,
     matlab_bin,
     matlab_env_overrides,
     mo,
     octave_bin,
+    selected_runtime_value,
+    set_extraction_job,
+    spk_path,
+):
+    _extraction_is_running = extraction_job() is not None
+
+
+    def _start_extraction(_):
+        if (
+            extraction_job() is not None
+            or not can_extract
+            or spk_path is None
+            or active_log_path is None
+        ):
+            return
+
+        set_extraction_job(
+            {
+                "status": "requested",
+                "runtime": selected_runtime_value,
+                "spk_path": spk_path,
+                "wrapper_script": active_wrapper_script,
+                "loader_dir": loader_dir,
+                "matlab_bin": matlab_bin,
+                "matlab_env_overrides": matlab_env_overrides,
+                "octave_bin": octave_bin,
+                "log_path": active_log_path,
+            }
+        )
+
+
+    extract_spikes_button = mo.ui.button(
+        label=(
+            "Extracting..."
+            if _extraction_is_running
+            else "Extract spike timings to CSV"
+        ),
+        on_click=_start_extraction,
+        disabled=not can_extract or _extraction_is_running,
+        kind="warn" if _extraction_is_running else "success",
+    )
+    extract_spikes_button
+    return
+
+
+@app.cell
+def _(
+    extraction_job,
+    mo,
     read_log_tail,
     run_axisfile_wrapper_with_matlab,
     run_axisfile_wrapper_with_octave,
-    runtime_blockers,
-    selected_runtime_value,
-    spk_path,
+    set_extraction_job,
 ):
-    mo.stop(not extract_spikes_button.value)
+    _extraction_job = extraction_job()
+    mo.stop(
+        _extraction_job is None
+        or _extraction_job["status"] != "requested"
+    )
 
-    if spk_path is None or active_log_path is None:
-        message = (
-            "## Conversion Result\n"
-            "- Select a valid .spk file before starting extraction."
-        )
-    elif runtime_blockers:
-        message = (
-            "## Conversion Result\n"
-            + "\n".join(f"- {warning}" for warning in runtime_blockers)
-            + f"\n- Expected log file: `{active_log_path}`\n"
-        )
-    else:
-        with mo.status.spinner(
-            title="Extracting spike timings to CSV...",
-            subtitle=f"{spk_path.name} using {selected_runtime_value}",
-        ):
-            try:
-                if selected_runtime_value == "matlab":
-                    csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_matlab(
-                        spk_path=spk_path,
-                        wrapper_script=active_wrapper_script,
-                        loader_dir=loader_dir,
-                        matlab_bin=matlab_bin,
-                        matlab_env_overrides=matlab_env_overrides,
+    _running_job = {**_extraction_job, "status": "running"}
+    set_extraction_job(_running_job)
+
+
+    def _run_extraction():
+        _runtime = _running_job["runtime"]
+        _spk_path = _running_job["spk_path"]
+        _active_log_path = _running_job["log_path"]
+
+        try:
+            with mo.status.spinner(
+                title="Extracting spike timings to CSV...",
+                subtitle=f"{_spk_path.name} using {_runtime}",
+            ):
+                try:
+                    if _runtime == "matlab":
+                        _csv_path, _stdout, _stderr, _log_path = (
+                            run_axisfile_wrapper_with_matlab(
+                                spk_path=_spk_path,
+                                wrapper_script=_running_job["wrapper_script"],
+                                loader_dir=_running_job["loader_dir"],
+                                matlab_bin=_running_job["matlab_bin"],
+                                matlab_env_overrides=_running_job[
+                                    "matlab_env_overrides"
+                                ],
+                            )
+                        )
+                    else:
+                        _csv_path, _stdout, _stderr, _log_path = (
+                            run_axisfile_wrapper_with_octave(
+                                spk_path=_spk_path,
+                                wrapper_script=_running_job["wrapper_script"],
+                                loader_dir=_running_job["loader_dir"],
+                                octave_bin=_running_job["octave_bin"],
+                            )
+                        )
+
+                    _message = (
+                        "## Conversion Result\n"
+                        f"- Runtime: `{_runtime}`\n"
+                        f"- CSV created at: `{_csv_path}`\n"
+                        f"- Log file: `{_log_path}`\n"
                     )
-                else:
-                    csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_octave(
-                        spk_path=spk_path,
-                        wrapper_script=active_wrapper_script,
-                        loader_dir=loader_dir,
-                        octave_bin=octave_bin,
+                    if _stdout:
+                        _message += f"```text\n{_stdout}\n```\n"
+                    if _stderr:
+                        _message += f"```text\n{_stderr}\n```\n"
+                except Exception as _exc:
+                    _log_tail = read_log_tail(_active_log_path)
+                    _message = (
+                        "## Conversion Result\n"
+                        f"- Runtime: `{_runtime}`\n"
+                        "- Status: failed\n"
+                        f"- Log file: `{_active_log_path}`\n"
+                        f"```text\n{_exc}\n```\n"
                     )
+                    if _log_tail:
+                        _message += (
+                            f"### Log Tail\n```text\n{_log_tail}\n```\n"
+                        )
 
-                message = (
-                    "## Conversion Result\n"
-                    f"- Runtime: `{selected_runtime_value}`\n"
-                    f"- CSV created at: `{csv_path}`\n"
-                    f"- Log file: `{log_path}`\n"
-                )
-                if stdout:
-                    message += f"```text\n{stdout}\n```\n"
-                if stderr:
-                    message += f"```text\n{stderr}\n```\n"
-            except Exception as exc:
-                log_tail = read_log_tail(active_log_path)
-                message = (
-                    "## Conversion Result\n"
-                    f"- Runtime: `{selected_runtime_value}`\n"
-                    "- Status: failed\n"
-                    f"- Log file: `{active_log_path}`\n"
-                    f"```text\n{exc}\n```\n"
-                )
-                if log_tail:
-                    message += f"### Log Tail\n```text\n{log_tail}\n```\n"
+            mo.output.replace(mo.md(_message))
+        finally:
+            set_extraction_job(None)
 
-    mo.md(message)
+
+    _extraction_thread = mo.Thread(target=_run_extraction, daemon=True)
+    _extraction_thread.start()
     return
 
 
