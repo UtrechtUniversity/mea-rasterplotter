@@ -6,6 +6,7 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    from collections.abc import Callable
     import os
     from pathlib import Path
     import shutil
@@ -30,6 +31,35 @@ def _():
             return ""
 
         return "\n".join(lines[-max_lines:])
+
+    def run_logged_subprocess(
+        command: list[str],
+        *,
+        log_path: Path,
+        env: dict[str, str] | None = None,
+        on_log_line: Callable[[str], None] | None = None,
+    ) -> int:
+        with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
+            with subprocess.Popen(
+                command,
+                env=env,
+                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            ) as process:
+                if process.stdout is None:
+                    raise RuntimeError("Unable to capture subprocess output.")
+
+                for output_line in process.stdout:
+                    log_file.write(output_line)
+                    log_file.flush()
+                    if on_log_line is not None:
+                        on_log_line(output_line.rstrip("\r\n"))
+
+                return process.wait()
 
     def octave_loader_is_compatible(loader_dir: Path) -> bool:
         spike_dataset_file = loader_dir / "SpikeDataSet.m"
@@ -179,6 +209,7 @@ def _():
         loader_dir: Path,
         matlab_bin: str,
         matlab_env_overrides: dict[str, str],
+        on_log_line: Callable[[str], None] | None = None,
     ) -> tuple[Path, str, str, Path]:
         spk_path = spk_path.expanduser().resolve()
         wrapper_script = wrapper_script.expanduser().resolve()
@@ -211,18 +242,15 @@ def _():
         subprocess_env = os.environ.copy()
         subprocess_env.update(matlab_env_overrides)
 
-        with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
-            result = subprocess.run(
-                [matlab_bin, "-batch", batch_code],
-                env=subprocess_env,
-                stderr=subprocess.STDOUT,
-                stdout=log_file,
-                text=True,
-                check=False,
-            )
+        returncode = run_logged_subprocess(
+            [matlab_bin, "-batch", batch_code],
+            log_path=log_path,
+            env=subprocess_env,
+            on_log_line=on_log_line,
+        )
         log_tail = read_log_tail(log_path)
 
-        if result.returncode != 0:
+        if returncode != 0:
             raise RuntimeError(
                 "MATLAB conversion failed.\n"
                 f"Log file: {log_path}\n"
@@ -245,6 +273,7 @@ def _():
         wrapper_script: Path,
         loader_dir: Path,
         octave_bin: str,
+        on_log_line: Callable[[str], None] | None = None,
     ) -> tuple[Path, str, str, Path]:
         spk_path = spk_path.expanduser().resolve()
         wrapper_script = wrapper_script.expanduser().resolve()
@@ -277,17 +306,14 @@ def _():
             "end;"
         )
 
-        with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
-            result = subprocess.run(
-                [octave_bin, "--quiet", "--no-gui", "--no-history", "--eval", eval_code],
-                stderr=subprocess.STDOUT,
-                stdout=log_file,
-                text=True,
-                check=False,
-            )
+        returncode = run_logged_subprocess(
+            [octave_bin, "--quiet", "--no-gui", "--no-history", "--eval", eval_code],
+            log_path=log_path,
+            on_log_line=on_log_line,
+        )
         log_tail = read_log_tail(log_path)
 
-        if result.returncode != 0:
+        if returncode != 0:
             hint = ""
             error_text = log_tail
             if "matlab.mixin" in error_text or "no such method or property 'empty'" in error_text:
@@ -663,15 +689,51 @@ def _(
 
 
     def _run_extraction():
+        from collections import deque as _deque
+
         _runtime = _running_job["runtime"]
         _spk_path = _running_job["spk_path"]
         _active_log_path = _running_job["log_path"]
+        _live_log_lines = _deque(maxlen=200)
 
         try:
             with mo.status.spinner(
                 title="Extracting spike timings to CSV...",
                 subtitle=f"{_spk_path.name} using {_runtime}",
-            ):
+            ) as _spinner:
+                def _render_live_log():
+                    _live_log_text = (
+                        "\n".join(_live_log_lines)
+                        if _live_log_lines
+                        else "Waiting for runtime output..."
+                    )
+                    _live_log_panel = mo.plain_text(_live_log_text).style(
+                        max_height="18rem",
+                        overflow_y="auto",
+                        display="flex",
+                        flex_direction="column-reverse",
+                        border="1px solid var(--slate-6)",
+                        border_radius="0.375rem",
+                        padding="0.75rem",
+                    )
+                    mo.output.replace(
+                        mo.vstack(
+                            [
+                                _spinner,
+                                mo.md(f"**Live log:** `{_active_log_path}`"),
+                                _live_log_panel,
+                            ],
+                            align="stretch",
+                            gap=0.35,
+                        )
+                    )
+
+                def _on_log_line(_line):
+                    _live_log_lines.append(_line)
+                    _render_live_log()
+
+                _render_live_log()
+
                 try:
                     if _runtime == "matlab":
                         _csv_path, _stdout, _stderr, _log_path = (
@@ -683,6 +745,7 @@ def _(
                                 matlab_env_overrides=_running_job[
                                     "matlab_env_overrides"
                                 ],
+                                on_log_line=_on_log_line,
                             )
                         )
                     else:
@@ -692,6 +755,7 @@ def _(
                                 wrapper_script=_running_job["wrapper_script"],
                                 loader_dir=_running_job["loader_dir"],
                                 octave_bin=_running_job["octave_bin"],
+                                on_log_line=_on_log_line,
                             )
                         )
 
@@ -726,6 +790,7 @@ def _(
 
     _extraction_thread = mo.Thread(target=_run_extraction, daemon=True)
     _extraction_thread.start()
+
     return
 
 
