@@ -619,44 +619,48 @@ def _(
             + f"\n- Expected log file: `{active_log_path}`\n"
         )
     else:
-        try:
-            if selected_runtime_value == "matlab":
-                csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_matlab(
-                    spk_path=spk_path,
-                    wrapper_script=active_wrapper_script,
-                    loader_dir=loader_dir,
-                    matlab_bin=matlab_bin,
-                    matlab_env_overrides=matlab_env_overrides,
-                )
-            else:
-                csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_octave(
-                    spk_path=spk_path,
-                    wrapper_script=active_wrapper_script,
-                    loader_dir=loader_dir,
-                    octave_bin=octave_bin,
-                )
+        with mo.status.spinner(
+            title="Extracting spike timings to CSV...",
+            subtitle=f"{spk_path.name} using {selected_runtime_value}",
+        ):
+            try:
+                if selected_runtime_value == "matlab":
+                    csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_matlab(
+                        spk_path=spk_path,
+                        wrapper_script=active_wrapper_script,
+                        loader_dir=loader_dir,
+                        matlab_bin=matlab_bin,
+                        matlab_env_overrides=matlab_env_overrides,
+                    )
+                else:
+                    csv_path, stdout, stderr, log_path = run_axisfile_wrapper_with_octave(
+                        spk_path=spk_path,
+                        wrapper_script=active_wrapper_script,
+                        loader_dir=loader_dir,
+                        octave_bin=octave_bin,
+                    )
 
-            message = (
-                "## Conversion Result\n"
-                f"- Runtime: `{selected_runtime_value}`\n"
-                f"- CSV created at: `{csv_path}`\n"
-                f"- Log file: `{log_path}`\n"
-            )
-            if stdout:
-                message += f"```text\n{stdout}\n```\n"
-            if stderr:
-                message += f"```text\n{stderr}\n```\n"
-        except Exception as exc:
-            log_tail = read_log_tail(active_log_path)
-            message = (
-                "## Conversion Result\n"
-                f"- Runtime: `{selected_runtime_value}`\n"
-                "- Status: failed\n"
-                f"- Log file: `{active_log_path}`\n"
-                f"```text\n{exc}\n```\n"
-            )
-            if log_tail:
-                message += f"### Log Tail\n```text\n{log_tail}\n```\n"
+                message = (
+                    "## Conversion Result\n"
+                    f"- Runtime: `{selected_runtime_value}`\n"
+                    f"- CSV created at: `{csv_path}`\n"
+                    f"- Log file: `{log_path}`\n"
+                )
+                if stdout:
+                    message += f"```text\n{stdout}\n```\n"
+                if stderr:
+                    message += f"```text\n{stderr}\n```\n"
+            except Exception as exc:
+                log_tail = read_log_tail(active_log_path)
+                message = (
+                    "## Conversion Result\n"
+                    f"- Runtime: `{selected_runtime_value}`\n"
+                    "- Status: failed\n"
+                    f"- Log file: `{active_log_path}`\n"
+                    f"```text\n{exc}\n```\n"
+                )
+                if log_tail:
+                    message += f"### Log Tail\n```text\n{log_tail}\n```\n"
 
     mo.md(message)
     return
