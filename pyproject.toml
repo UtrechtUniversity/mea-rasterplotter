@@ -24,3 +24,9 @@ dev = [
     "ruff>=0.16.3",
     "ty>=0.0.72",
 ]
+
+[tool.ruff.lint]
+ignore = [
+    "PLR1711", # Useless returns: used by Marimo to delimit the end of a cell.
+    "B018", # The last expression of a Marimo cell is the cell's visual output
+]
