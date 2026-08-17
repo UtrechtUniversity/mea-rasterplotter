@@ -694,9 +694,10 @@ def _(
 
     def _run_extraction():
         from collections import deque as _deque
+        from pathlib import Path as _Path
 
         _runtime = _running_job["runtime"]
-        _spk_path = _running_job["spk_path"]
+        _spk_path = _Path(_running_job["spk_path"])
         _active_log_path = _running_job["log_path"]
         _live_log_lines = _deque(maxlen=200)
 

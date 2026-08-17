@@ -69,11 +69,12 @@ def _():
         )
 
     def available_wells(df: pl.DataFrame) -> list[str]:
-        return (
+        wells = (
             df.select(pl.col("Well_Label").drop_nulls().unique(maintain_order=True))
             .to_series()
             .to_list()
         )
+        return [str(well) for well in wells]
 
     def combine_available_wells(*well_lists: list[str]) -> list[str]:
         well_labels: list[str] = []
@@ -87,7 +88,7 @@ def _():
         return well_labels
 
     def available_channels(df: pl.DataFrame) -> list[str]:
-        return (
+        channels = (
             df.select(
                 pl.col("Channel_Label")
                 .cast(pl.Utf8)
@@ -97,6 +98,7 @@ def _():
             .to_series()
             .to_list()
         )
+        return [str(channel) for channel in channels]
 
     def sorted_channel_union(*channel_lists: list[str]) -> list[str]:
         return sorted({str(channel) for channel_list in channel_lists for channel in channel_list})
@@ -336,7 +338,7 @@ def _():
         well_label: str,
         settings: PlotSettings,
         title: str | None = None,
-    ):
+    ) -> Figure:
         window_start = min(settings.start_time, settings.end_time)
         window_end = max(settings.start_time, settings.end_time)
         window_seconds = window_end - window_start
