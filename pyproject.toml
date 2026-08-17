@@ -18,3 +18,8 @@ dependencies = [
 marimo-ai = [
     "pydantic-ai>=1.73.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.72",
+]
