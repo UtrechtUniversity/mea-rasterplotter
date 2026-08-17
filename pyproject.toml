@@ -18,3 +18,22 @@ dependencies = [
 marimo-ai = [
     "pydantic-ai>=1.73.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.3",
+    "ty>=0.0.72",
+]
+
+[tool.ruff.lint]
+preview = true
+ignore = [
+    "PLR1711", # Useless returns: used by Marimo to delimit the end of a cell.
+    "B018", # Useless expression: the last expression of a Marimo cell is its visual output
+]
+
+[tool.ty.rules]
+# https://docs.astral.sh/ty/coming-from-mypy-or-pyright/#recommended-configuration
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
+unsound-return-statement = "error"

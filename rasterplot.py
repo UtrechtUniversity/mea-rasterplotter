@@ -18,9 +18,9 @@ def _():
     from pathlib import Path
 
     import marimo as mo
-    from matplotlib.figure import Figure
     import numpy as np
     import polars as pl
+    from matplotlib.figure import Figure
 
     SPIKE_REQUIRED_COLUMNS = {
         "Channel_Label",
@@ -69,11 +69,12 @@ def _():
         )
 
     def available_wells(df: pl.DataFrame) -> list[str]:
-        return (
+        wells = (
             df.select(pl.col("Well_Label").drop_nulls().unique(maintain_order=True))
             .to_series()
             .to_list()
         )
+        return [str(well) for well in wells]
 
     def combine_available_wells(*well_lists: list[str]) -> list[str]:
         well_labels: list[str] = []
@@ -87,7 +88,7 @@ def _():
         return well_labels
 
     def available_channels(df: pl.DataFrame) -> list[str]:
-        return (
+        channels = (
             df.select(
                 pl.col("Channel_Label")
                 .cast(pl.Utf8)
@@ -97,6 +98,7 @@ def _():
             .to_series()
             .to_list()
         )
+        return [str(channel) for channel in channels]
 
     def sorted_channel_union(*channel_lists: list[str]) -> list[str]:
         return sorted({str(channel) for channel_list in channel_lists for channel in channel_list})
@@ -336,7 +338,7 @@ def _():
         well_label: str,
         settings: PlotSettings,
         title: str | None = None,
-    ):
+    ) -> Figure:
         window_start = min(settings.start_time, settings.end_time)
         window_end = max(settings.start_time, settings.end_time)
         window_seconds = window_end - window_start
@@ -532,8 +534,6 @@ def _(load_spike_csv, mo, resolved_baseline_csv, resolved_exposure_csv):
     mo.stop(resolved_baseline_csv is None or resolved_exposure_csv is None)
     baseline_data = load_spike_csv(resolved_baseline_csv, "Baseline CSV")
     exposure_data = load_spike_csv(resolved_exposure_csv, "Exposure CSV")
-    baseline_csv = resolved_baseline_csv
-    exposure_csv = resolved_exposure_csv
     return baseline_data, exposure_data
 
 
@@ -1012,14 +1012,11 @@ def _(
     exposure_well_data,
     mo,
     shared_channel_labels,
-    well_label,
     well_labels,
 ):
-    selected_well_label = well_label or "None"
     mo.md(
         "\n".join(
             [
-                "### Data Summary",
                 f"- Available wells across both files: `{len(well_labels)}`",
                 f"- Baseline spikes in current view: `{baseline_well_data.height}`",
                 f"- Exposure spikes in current view: `{exposure_well_data.height}`",
