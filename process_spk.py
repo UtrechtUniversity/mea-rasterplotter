@@ -6,12 +6,12 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    from collections.abc import Callable
     import os
-    from pathlib import Path
     import shutil
-    from string import Template
     import subprocess
+    from collections.abc import Callable
+    from pathlib import Path
+    from string import Template
 
     import marimo as mo
 
@@ -39,8 +39,9 @@ def _():
         env: dict[str, str] | None = None,
         on_log_line: Callable[[str], None] | None = None,
     ) -> int:
-        with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
-            with subprocess.Popen(
+        with (
+            log_path.open("w", encoding="utf-8", buffering=1) as log_file,
+            subprocess.Popen(
                 command,
                 env=env,
                 stderr=subprocess.STDOUT,
@@ -49,17 +50,18 @@ def _():
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-            ) as process:
-                if process.stdout is None:
-                    raise RuntimeError("Unable to capture subprocess output.")
+            ) as process,
+        ):
+            if process.stdout is None:
+                raise RuntimeError("Unable to capture subprocess output.")
 
-                for output_line in process.stdout:
-                    log_file.write(output_line)
-                    log_file.flush()
-                    if on_log_line is not None:
-                        on_log_line(output_line.rstrip("\r\n"))
+            for output_line in process.stdout:
+                log_file.write(output_line)
+                log_file.flush()
+                if on_log_line is not None:
+                    on_log_line(output_line.rstrip("\r\n"))
 
-                return process.wait()
+            return process.wait()
 
     def octave_loader_is_compatible(loader_dir: Path) -> bool:
         spike_dataset_file = loader_dir / "SpikeDataSet.m"
@@ -173,9 +175,11 @@ def _():
             return (
                 None,
                 [
-                    "Configured MATLAB executable path must be absolute. "
-                    "You can use environment variables inside it, for example "
-                    "`$MATLAB_HOME/bin/matlab`."
+                    (
+                        "Configured MATLAB executable path must be absolute. "
+                        "You can use environment variables inside it, for example "
+                        "`$MATLAB_HOME/bin/matlab`."
+                    ),
                 ],
                 True,
             )
@@ -769,7 +773,7 @@ def _(
                         _message += f"```text\n{_stdout}\n```\n"
                     if _stderr:
                         _message += f"```text\n{_stderr}\n```\n"
-                except Exception as _exc:
+                except (OSError, RuntimeError) as _exc:
                     _log_tail = read_log_tail(_active_log_path)
                     _message = (
                         "## Conversion Result\n"
@@ -790,7 +794,6 @@ def _(
 
     _extraction_thread = mo.Thread(target=_run_extraction, daemon=True)
     _extraction_thread.start()
-
     return
 
 

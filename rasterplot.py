@@ -18,9 +18,9 @@ def _():
     from pathlib import Path
 
     import marimo as mo
-    from matplotlib.figure import Figure
     import numpy as np
     import polars as pl
+    from matplotlib.figure import Figure
 
     SPIKE_REQUIRED_COLUMNS = {
         "Channel_Label",
@@ -532,8 +532,6 @@ def _(load_spike_csv, mo, resolved_baseline_csv, resolved_exposure_csv):
     mo.stop(resolved_baseline_csv is None or resolved_exposure_csv is None)
     baseline_data = load_spike_csv(resolved_baseline_csv, "Baseline CSV")
     exposure_data = load_spike_csv(resolved_exposure_csv, "Exposure CSV")
-    baseline_csv = resolved_baseline_csv
-    exposure_csv = resolved_exposure_csv
     return baseline_data, exposure_data
 
 
@@ -1012,14 +1010,11 @@ def _(
     exposure_well_data,
     mo,
     shared_channel_labels,
-    well_label,
     well_labels,
 ):
-    selected_well_label = well_label or "None"
     mo.md(
         "\n".join(
             [
-                "### Data Summary",
                 f"- Available wells across both files: `{len(well_labels)}`",
                 f"- Baseline spikes in current view: `{baseline_well_data.height}`",
                 f"- Exposure spikes in current view: `{exposure_well_data.height}`",
