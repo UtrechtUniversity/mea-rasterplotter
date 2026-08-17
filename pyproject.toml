@@ -26,7 +26,8 @@ dev = [
 ]
 
 [tool.ruff.lint]
+preview = true
 ignore = [
     "PLR1711", # Useless returns: used by Marimo to delimit the end of a cell.
-    "B018", # The last expression of a Marimo cell is the cell's visual output
+    "B018", # Useless expression: the last expression of a Marimo cell is its visual output
 ]
