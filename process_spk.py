@@ -211,7 +211,7 @@ def _():
         spk_path: Path,
         wrapper_script: Path,
         loader_dir: Path,
-        matlab_bin: str,
+        matlab_bin: str | None,
         matlab_env_overrides: dict[str, str],
         on_log_line: Callable[[str], None] | None = None,
     ) -> tuple[Path, str, str, Path]:
@@ -276,7 +276,7 @@ def _():
         spk_path: Path,
         wrapper_script: Path,
         loader_dir: Path,
-        octave_bin: str,
+        octave_bin: str | None,
         on_log_line: Callable[[str], None] | None = None,
     ) -> tuple[Path, str, str, Path]:
         spk_path = spk_path.expanduser().resolve()
@@ -460,7 +460,25 @@ def _(Path, spk_path_picker):
 
 @app.cell
 def _(mo):
-    extraction_job, set_extraction_job = mo.state(None)
+    from pathlib import Path as _Path
+    from typing import Literal as _Literal
+    from typing import TypedDict as _TypedDict
+
+
+    class ExtractionJob(_TypedDict):
+        status: _Literal["requested", "running"]
+        runtime: str
+        spk_path: _Path
+        wrapper_script: _Path
+        loader_dir: _Path
+        matlab_bin: str | None
+        matlab_env_overrides: dict[str, str]
+        octave_bin: str | None
+        log_path: _Path
+
+
+    _initial_extraction_job: ExtractionJob | None = None
+    extraction_job, set_extraction_job = mo.state(_initial_extraction_job)
     return extraction_job, set_extraction_job
 
 
@@ -687,8 +705,10 @@ def _(
         _extraction_job is None
         or _extraction_job["status"] != "requested"
     )
+    assert _extraction_job is not None
 
-    _running_job = {**_extraction_job, "status": "running"}
+    _running_job = _extraction_job.copy()
+    _running_job["status"] = "running"
     set_extraction_job(_running_job)
 
 
