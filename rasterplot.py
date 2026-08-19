@@ -85,7 +85,17 @@ def _():
                 if well_label not in seen:
                     well_labels.append(well_label)
                     seen.add(well_label)
-        return well_labels
+
+        def _well_sort_key(well_label: str) -> tuple[str, float, str]:
+            normalized_label = well_label.strip()
+            row_label = normalized_label.rstrip("0123456789")
+            column_label = normalized_label[len(row_label) :]
+            column_number = (
+                float(column_label) if column_label.isdigit() else float("inf")
+            )
+            return row_label.casefold(), column_number, normalized_label.casefold()
+
+        return sorted(well_labels, key=_well_sort_key)
 
     def available_channels(df: pl.DataFrame) -> list[str]:
         channels = (
