@@ -590,10 +590,12 @@ def _(
         ),
     ]
 
-    blocks = [mo.md("## Configuration\n" + "\n".join(status))]
+    _configuration_blocks = [mo.md("\n".join(status))]
     if runtime_notes:
-        blocks.append(mo.md("**Notes**\n" + "\n".join(f"- {note}" for note in runtime_notes)))
-    blocks.append(
+        _configuration_blocks.append(
+            mo.md("**Notes**\n" + "\n".join(f"- {note}" for note in runtime_notes))
+        )
+    _configuration_blocks.append(
         mo.vstack(
             [
                 matlab_executable_path_input,
@@ -601,6 +603,23 @@ def _(
             ]
         )
     )
+
+    blocks = [
+        mo.accordion(
+            {
+                "Configuration / Status": mo.vstack(
+                    _configuration_blocks,
+                    align="stretch",
+                    gap=0.5,
+                )
+            }
+        )
+    ]
+
+    blocks.append(
+        mo.md("## Spike timing extraction")
+    )
+
     if config_warnings:
         blocks.append(
             mo.md("**Warnings**\n" + "\n".join(f"- {warning}" for warning in config_warnings))
@@ -625,6 +644,7 @@ def _(
     blocks.append(mo.md(displayed_paths))
 
     mo.vstack(blocks, align="stretch", gap=0.5)
+
     return (
         active_log_path,
         active_wrapper_script,
