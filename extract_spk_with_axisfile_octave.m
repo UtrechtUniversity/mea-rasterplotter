@@ -1,3 +1,8 @@
+% This file provides experimental support for extraction via GNU Octave https://octave.org/ instead of MATLAB.
+% Used during initial development. To use it instead of MATLAB:
+% Checkout the feature/octave branch from git@github.com:ar-jan/AxionFileLoader.git
+% in the vendored AxionFileLoader, and select Octave in the process_spk notebook.
+
 function extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir)
 %EXTRACT_SPK_WITH_AXISFILE_OCTAVE Convert one Axion .spk file to CSV.
 %   extract_spk_with_axisfile_octave(spk_path, output_csv, loader_dir)
