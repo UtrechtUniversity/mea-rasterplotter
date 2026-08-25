@@ -349,7 +349,6 @@ def _():
         mo,
         octave_loader_is_compatible,
         parse_env_overrides,
-        read_log_tail,
         resolve_matlab_executable,
         run_axisfile_wrapper_with_matlab,
         run_axisfile_wrapper_with_octave,
@@ -644,7 +643,6 @@ def _(
     blocks.append(mo.md(displayed_paths))
 
     mo.vstack(blocks, align="stretch", gap=0.5)
-
     return (
         active_log_path,
         active_wrapper_script,
@@ -715,7 +713,6 @@ def _(
 def _(
     extraction_job,
     mo,
-    read_log_tail,
     run_axisfile_wrapper_with_matlab,
     run_axisfile_wrapper_with_octave,
     set_extraction_job,
@@ -734,18 +731,90 @@ def _(
 
     def _run_extraction():
         from collections import deque as _deque
+        from contextlib import nullcontext as _nullcontext
         from pathlib import Path as _Path
+        from re import compile as _compile
+        from time import monotonic as _monotonic
 
         _runtime = _running_job["runtime"]
         _spk_path = _Path(_running_job["spk_path"])
         _active_log_path = _running_job["log_path"]
         _live_log_lines = _deque(maxlen=200)
+        _started_at = _monotonic()
+        _progress_percent = 0
+
+        _progress_milestones = [
+            (
+                _compile(r"Loaded (\d+) trigger-aligned spikes\."),
+                25,
+                "Mapping channels",
+                lambda _match: f"Loaded {int(_match.group(1)):,} spikes",
+            ),
+            (
+                _compile(r"Mapped (\d+) spikes across (\d+) hardware channels\."),
+                85,
+                "Writing CSV",
+                lambda _match: (
+                    f"Mapped {int(_match.group(1)):,} spikes "
+                    f"across {int(_match.group(2)):,} channels"
+                ),
+            ),
+            (
+                _compile(r"Writing CSV table with (\d+) rows\."),
+                85,
+                "Writing CSV",
+                lambda _match: f"Writing {int(_match.group(1)):,} rows",
+            ),
+            (
+                _compile(r"Completed extraction in ([\d.]+)s\."),
+                100,
+                "Completed",
+                lambda _match: f"Completed in {_match.group(1)}s",
+            ),
+        ]
 
         try:
+            _bar_context = (
+                mo.status.progress_bar(
+                    total=100,
+                    title="Starting MATLAB",
+                    subtitle="Loading spike data...",
+                    show_rate=False,
+                    show_eta=False,
+                )
+                if _runtime == "matlab"
+                else _nullcontext()
+            )
             with mo.status.spinner(
                 title="Extracting spike timings to CSV...",
-                subtitle=f"{_spk_path.name} using {_runtime}",
-            ) as _spinner:
+            ) as _spinner, _bar_context as _progress_bar:
+                def _update_progress(_line):
+                    nonlocal _progress_percent
+                    if _progress_bar is None:
+                        return
+                    for (
+                        _pattern,
+                        _target_percent,
+                        _title,
+                        _detail,
+                    ) in _progress_milestones:
+                        _match = _pattern.search(_line)
+                        if _match is None:
+                            continue
+                        _new_percent = max(_target_percent, _progress_percent)
+                        _increment = _new_percent - _progress_percent
+                        _progress_percent = _new_percent
+                        _elapsed = _monotonic() - _started_at
+                        _subtitle = _detail(_match)
+                        if _target_percent != 100:
+                            _subtitle = f"{_subtitle} · {_elapsed:.1f}s elapsed"
+                        _progress_bar.update(
+                            increment=_increment,
+                            title=_title,
+                            subtitle=_subtitle,
+                        )
+                        return
+
                 def _render_live_log():
                     _live_log_text = (
                         "\n".join(_live_log_lines)
@@ -761,13 +830,13 @@ def _(
                         border_radius="0.375rem",
                         padding="0.75rem",
                     )
+                    _running_elements = [_spinner]
+                    if _progress_bar is not None:
+                        _running_elements.append(_progress_bar)
+                    _running_elements.append(_live_log_panel)
                     mo.output.replace(
                         mo.vstack(
-                            [
-                                _spinner,
-                                mo.md(f"**Live log:** `{_active_log_path}`"),
-                                _live_log_panel,
-                            ],
+                            _running_elements,
                             align="stretch",
                             gap=0.35,
                         )
@@ -775,6 +844,7 @@ def _(
 
                 def _on_log_line(_line):
                     _live_log_lines.append(_line)
+                    _update_progress(_line)
                     _render_live_log()
 
                 _render_live_log()
@@ -804,37 +874,44 @@ def _(
                             )
                         )
 
-                    _message = (
-                        "## Conversion Result\n"
-                        f"- Runtime: `{_runtime}`\n"
-                        f"- CSV created at: `{_csv_path}`\n"
-                        f"- Log file: `{_log_path}`\n"
-                    )
+                    _log_text = ""
                     if _stdout:
-                        _message += f"```text\n{_stdout}\n```\n"
+                        _log_text += f"```text\n{_stdout}\n```\n"
                     if _stderr:
-                        _message += f"```text\n{_stderr}\n```\n"
-                except (OSError, RuntimeError) as _exc:
-                    _log_tail = read_log_tail(_active_log_path)
-                    _message = (
-                        "## Conversion Result\n"
-                        f"- Runtime: `{_runtime}`\n"
-                        "- Status: failed\n"
-                        f"- Log file: `{_active_log_path}`\n"
-                        f"```text\n{_exc}\n```\n"
+                        _log_text += f"```text\n{_stderr}\n```\n"
+                    _result_callout = mo.callout(
+                        mo.md(f"CSV created at: `{_csv_path}`"),
+                        kind="success",
+                        title="Extraction completed",
                     )
-                    if _log_tail:
-                        _message += (
-                            f"### Log Tail\n```text\n{_log_tail}\n```\n"
-                        )
+                except (OSError, RuntimeError) as _exc:
+                    _log_text = "\n".join(_live_log_lines)
+                    if _log_text:
+                        _log_text = f"```text\n{_log_text}\n```\n"
+                    _short_error = str(_exc).splitlines()[0] if str(_exc) else "Extraction failed."
+                    _result_callout = mo.callout(
+                        mo.md(
+                            f"{_short_error}\n\n"
+                            f"Log file: `{_active_log_path}`"
+                        ),
+                        kind="danger",
+                        title="Extraction failed",
+                    )
 
-            mo.output.replace(mo.md(_message))
+            _result_elements = []
+            if _log_text:
+                _result_elements.append(mo.md(_log_text))
+            _result_elements.append(_result_callout)
+            mo.output.replace(
+                mo.vstack(_result_elements, align="stretch", gap=0.35)
+            )
         finally:
             set_extraction_job(None)
 
 
     _extraction_thread = mo.Thread(target=_run_extraction, daemon=True)
     _extraction_thread.start()
+
     return
 
 
