@@ -349,7 +349,6 @@ def _():
         mo,
         octave_loader_is_compatible,
         parse_env_overrides,
-        read_log_tail,
         resolve_matlab_executable,
         run_axisfile_wrapper_with_matlab,
         run_axisfile_wrapper_with_octave,
@@ -714,7 +713,6 @@ def _(
 def _(
     extraction_job,
     mo,
-    read_log_tail,
     run_axisfile_wrapper_with_matlab,
     run_axisfile_wrapper_with_octave,
     set_extraction_job,
@@ -789,7 +787,6 @@ def _(
             )
             with mo.status.spinner(
                 title="Extracting spike timings to CSV...",
-                subtitle=f"{_spk_path.name} using {_runtime}",
             ) as _spinner, _bar_context as _progress_bar:
                 def _update_progress(_line):
                     nonlocal _progress_percent
@@ -836,9 +833,6 @@ def _(
                     _running_elements = [_spinner]
                     if _progress_bar is not None:
                         _running_elements.append(_progress_bar)
-                    _running_elements.append(
-                        mo.md(f"**Live log:** `{_active_log_path}`")
-                    )
                     _running_elements.append(_live_log_panel)
                     mo.output.replace(
                         mo.vstack(
@@ -880,31 +874,37 @@ def _(
                             )
                         )
 
-                    _message = (
-                        "## Conversion Result\n"
-                        f"- Runtime: `{_runtime}`\n"
-                        f"- CSV created at: `{_csv_path}`\n"
-                        f"- Log file: `{_log_path}`\n"
-                    )
+                    _log_text = ""
                     if _stdout:
-                        _message += f"```text\n{_stdout}\n```\n"
+                        _log_text += f"```text\n{_stdout}\n```\n"
                     if _stderr:
-                        _message += f"```text\n{_stderr}\n```\n"
-                except (OSError, RuntimeError) as _exc:
-                    _log_tail = read_log_tail(_active_log_path)
-                    _message = (
-                        "## Conversion Result\n"
-                        f"- Runtime: `{_runtime}`\n"
-                        "- Status: failed\n"
-                        f"- Log file: `{_active_log_path}`\n"
-                        f"```text\n{_exc}\n```\n"
+                        _log_text += f"```text\n{_stderr}\n```\n"
+                    _result_callout = mo.callout(
+                        mo.md(f"CSV created at: `{_csv_path}`"),
+                        kind="success",
+                        title="Extraction completed",
                     )
-                    if _log_tail:
-                        _message += (
-                            f"### Log Tail\n```text\n{_log_tail}\n```\n"
-                        )
+                except (OSError, RuntimeError) as _exc:
+                    _log_text = "\n".join(_live_log_lines)
+                    if _log_text:
+                        _log_text = f"```text\n{_log_text}\n```\n"
+                    _short_error = str(_exc).splitlines()[0] if str(_exc) else "Extraction failed."
+                    _result_callout = mo.callout(
+                        mo.md(
+                            f"{_short_error}\n\n"
+                            f"Log file: `{_active_log_path}`"
+                        ),
+                        kind="danger",
+                        title="Extraction failed",
+                    )
 
-            mo.output.replace(mo.md(_message))
+            _result_elements = []
+            if _log_text:
+                _result_elements.append(mo.md(_log_text))
+            _result_elements.append(_result_callout)
+            mo.output.replace(
+                mo.vstack(_result_elements, align="stretch", gap=0.35)
+            )
         finally:
             set_extraction_job(None)
 
