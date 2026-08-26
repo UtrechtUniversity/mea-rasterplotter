@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.16"
+__generated_with = "0.24.0"
 app = marimo.App(width="medium")
 
 
@@ -438,6 +438,7 @@ def _(
         initial_path=initial_spk_dir,
         filetypes=[".spk"],
         multiple=False,
+        restrict_navigation=False,
         label="SPK file",
         on_change=lambda _: set_show_spk_picker(False),
     )
@@ -911,7 +912,6 @@ def _(
 
     _extraction_thread = mo.Thread(target=_run_extraction, daemon=True)
     _extraction_thread.start()
-
     return
 
 
