@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.16"
+__generated_with = "0.24.0"
 app = marimo.App(width="full")
 
 
@@ -490,6 +490,7 @@ def _(initial_csv_dir, mo, set_show_csv_pickers):
         initial_path=initial_csv_dir,
         filetypes=[".csv"],
         multiple=False,
+        restrict_navigation=False,
         label="Baseline CSV file",
         on_change=lambda _: set_show_csv_pickers(False),
     )
@@ -497,6 +498,7 @@ def _(initial_csv_dir, mo, set_show_csv_pickers):
         initial_path=initial_csv_dir,
         filetypes=[".csv"],
         multiple=False,
+        restrict_navigation=False,
         label="Exposure CSV file",
         on_change=lambda _: set_show_csv_pickers(False),
     )
