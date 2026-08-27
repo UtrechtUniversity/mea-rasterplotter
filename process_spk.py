@@ -65,6 +65,7 @@ def _():
 
     def octave_loader_is_compatible(loader_dir: Path) -> bool:
         spike_dataset_file = loader_dir / "SpikeDataSet.m"
+        axion_empty_helper = loader_dir / "axion_empty.m"
         heterogeneous_shim = loader_dir / "+matlab" / "+mixin" / "Heterogeneous.m"
         custom_display_shim = loader_dir / "+matlab" / "+mixin" / "CustomDisplay.m"
 
@@ -79,7 +80,9 @@ def _():
             return False
 
         return (
-            "LoadAllSpikesDetailed" in spike_dataset_text
+            "function [aElectrodes, aTimes] = LoadAllSpikes" in spike_dataset_text
+            and "BuildMappedDataWithoutMemmap" in spike_dataset_text
+            and axion_empty_helper.is_file()
             and heterogeneous_shim.is_file()
             and custom_display_shim.is_file()
         )
