@@ -469,9 +469,10 @@ def _(mo):
 
 
     class ExtractionJob(_TypedDict):
-        status: _Literal["requested", "running"]
+        status: _Literal["awaiting_confirmation", "requested", "running"]
         runtime: str
         spk_path: _Path
+        csv_path: _Path
         wrapper_script: _Path
         loader_dir: _Path
         matlab_bin: str | None
@@ -668,11 +669,14 @@ def _(
     matlab_env_overrides,
     mo,
     octave_bin,
+    output_csv_path,
     selected_runtime_value,
     set_extraction_job,
     spk_path,
 ):
-    _extraction_is_running = extraction_job() is not None
+    _job = extraction_job()
+    _extraction_is_running = _job is not None and _job["status"] in ("requested", "running")
+    _awaiting_confirmation = _job is not None and _job["status"] == "awaiting_confirmation"
 
 
     def _start_extraction(_):
@@ -680,15 +684,20 @@ def _(
             extraction_job() is not None
             or not can_extract
             or spk_path is None
+            or output_csv_path is None
             or active_log_path is None
         ):
             return
 
+        # Checked at click time, not at render time.
+        _initial_status = "awaiting_confirmation" if output_csv_path.exists() else "requested"
+
         set_extraction_job(
             {
-                "status": "requested",
+                "status": _initial_status,
                 "runtime": selected_runtime_value,
                 "spk_path": spk_path,
+                "csv_path": output_csv_path,
                 "wrapper_script": active_wrapper_script,
                 "loader_dir": loader_dir,
                 "matlab_bin": matlab_bin,
@@ -699,17 +708,75 @@ def _(
         )
 
 
+    if _extraction_is_running:
+        _label = "Extracting..."
+    elif _awaiting_confirmation:
+        _label = "Awaiting overwrite confirmation"
+    else:
+        _label = "Extract spike timings to CSV"
+
     extract_spikes_button = mo.ui.button(
-        label=(
-            "Extracting..."
-            if _extraction_is_running
-            else "Extract spike timings to CSV"
-        ),
+        label=_label,
         on_click=_start_extraction,
-        disabled=not can_extract or _extraction_is_running,
-        kind="warn" if _extraction_is_running else "success",
+        disabled=not can_extract or _extraction_is_running or _awaiting_confirmation,
+        kind="warn" if (_extraction_is_running or _awaiting_confirmation) else "success",
     )
     extract_spikes_button
+    return
+
+
+@app.cell
+def _(extraction_job, mo, set_extraction_job):
+    _job = extraction_job()
+    mo.stop(_job is None or _job["status"] != "awaiting_confirmation")
+    assert _job is not None
+
+
+    def _confirm_overwrite(_):
+        _current = extraction_job()
+        if _current is None or _current["status"] != "awaiting_confirmation":
+            return
+        _requested = _current.copy()
+        _requested["status"] = "requested"
+        set_extraction_job(_requested)
+
+
+    def _cancel_overwrite(_):
+        _current = extraction_job()
+        if _current is not None and _current["status"] == "awaiting_confirmation":
+            set_extraction_job(None)
+
+
+    confirm_overwrite_button = mo.ui.button(
+        label="Overwrite existing CSV",
+        kind="danger",
+        on_click=_confirm_overwrite,
+    )
+    cancel_overwrite_button = mo.ui.button(
+        label="Cancel",
+        on_click=_cancel_overwrite,
+    )
+
+    mo.callout(
+        mo.vstack(
+            [
+                mo.md(
+                    "The output file already exists and will be replaced:\n\n"
+                    f"`{_job['csv_path']}`\n\n"
+                    f"Source: `{_job['spk_path']}` · runtime: `{_job['runtime']}`"
+                ),
+                mo.hstack(
+                    [cancel_overwrite_button, confirm_overwrite_button],
+                    justify="start",
+                    gap=0.5,
+                ),
+            ],
+            align="stretch",
+            gap=0.5,
+        ),
+        kind="warn",
+        title="Confirm overwrite",
+    )
     return
 
 
