@@ -21,6 +21,7 @@ def _():
     import numpy as np
     import polars as pl
     from matplotlib.figure import Figure
+    from matplotlib.ticker import MaxNLocator, ScalarFormatter
 
     SPIKE_REQUIRED_COLUMNS = {
         "Channel_Label",
@@ -311,34 +312,6 @@ def _():
             settings.end_time,
         )
 
-    def make_spike_raster_figure(
-        dataset_label: str,
-        well_spikes: pl.DataFrame,
-        channel_labels: list[str],
-        well_label: str,
-        settings: PlotSettings,
-    ) -> Figure:
-        window_start = min(settings.start_time, settings.end_time)
-        window_end = max(settings.start_time, settings.end_time)
-        events = build_event_series(well_spikes, channel_labels)
-        spike_bin_edges, spike_rates = build_spike_rate_trace(
-            df=well_spikes,
-            window_start=window_start,
-            window_end=window_end,
-            electrode_count=len(channel_labels),
-            smoothing_method=settings.spike_count_smoothing_method,
-            exponential_tau_seconds=settings.spike_count_exponential_tau_seconds,
-            gaussian_width_factor=settings.spike_count_gaussian_width_factor,
-        )
-        return make_eventplot_figure(
-            events,
-            channel_labels,
-            spike_bin_edges,
-            spike_rates,
-            well_label,
-            settings,
-            title=f"{dataset_label} Raster Plot for Well {well_label}",
-        )
 
     def make_eventplot_figure(
         events: list[np.ndarray],
@@ -348,13 +321,15 @@ def _():
         well_label: str,
         settings: PlotSettings,
         title: str | None = None,
+        *,
+        show_time_axis: bool = False,
     ) -> Figure:
         window_start = min(settings.start_time, settings.end_time)
         window_end = max(settings.start_time, settings.end_time)
         window_seconds = window_end - window_start
         scale_seconds = nice_time_scale_seconds(window_seconds)
         fig = Figure(
-            figsize=(settings.figure_width, settings.figure_height),
+            figsize=(settings.figure_width, settings.figure_height + (0.5 if show_time_axis else 0.0)),
             dpi=settings.display_dpi,
             constrained_layout=True,
         )
@@ -412,7 +387,18 @@ def _():
             )
 
         ax.set_xlim(window_start - settings.x_pad_left, window_end + settings.x_pad_right)
-        ax.tick_params(axis="x", bottom=False, labelbottom=False)
+        ax.tick_params(axis="x", bottom=show_time_axis, labelbottom=show_time_axis)
+        if show_time_axis:
+            ax.set_xlabel("Time (s)")
+            locator = MaxNLocator(nbins=max(2, int(settings.figure_width)))
+            ticks = np.asarray(locator.tick_values(window_start, window_end), dtype=float)
+            ticks = ticks[(ticks >= window_start) & (ticks <= window_end)]
+            if window_start == window_end:
+                ticks = np.array([window_start])
+            ax.set_xticks(ticks)
+            formatter = ScalarFormatter(useOffset=False)
+            formatter.set_scientific(False)
+            ax.xaxis.set_major_formatter(formatter)
         ax.set_ylabel("")
         ax.grid(False)
         ax.spines["top"].set_visible(False)
@@ -457,14 +443,52 @@ def _():
         PlotSettings,
         available_channels,
         available_wells,
+        build_event_series,
+        build_spike_rate_trace,
         combine_available_wells,
         filter_well_for_plot,
         load_spike_csv,
-        make_spike_raster_figure,
+        make_eventplot_figure,
         mo,
         sorted_channel_union,
         timestamp_slider_bounds,
     )
+
+
+@app.cell
+def _(build_event_series, build_spike_rate_trace, make_eventplot_figure):
+    def make_spike_raster_figures(
+        dataset_label: str,
+        well_spikes,
+        channel_labels: list[str],
+        well_label: str,
+        settings,
+    ):
+        """Build a time-labelled preview and the original download from shared data."""
+        window_start = min(settings.start_time, settings.end_time)
+        window_end = max(settings.start_time, settings.end_time)
+        events = build_event_series(well_spikes, channel_labels)
+        bin_edges, rates = build_spike_rate_trace(
+            well_spikes,
+            window_start,
+            window_end,
+            len(channel_labels),
+            smoothing_method=settings.spike_count_smoothing_method,
+            exponential_tau_seconds=settings.spike_count_exponential_tau_seconds,
+            gaussian_width_factor=settings.spike_count_gaussian_width_factor,
+        )
+        display_fig, download_fig = (
+            make_eventplot_figure(
+                events, channel_labels, bin_edges, rates, well_label, settings,
+                title=f"{dataset_label} Raster Plot for Well {well_label}",
+                show_time_axis=show_time_axis,
+            )
+            for show_time_axis in (True, False)
+        )
+        return display_fig, download_fig
+
+
+    return (make_spike_raster_figures,)
 
 
 @app.cell
@@ -795,25 +819,30 @@ def _(
     baseline_well_data,
     exposure_plot_settings,
     exposure_well_data,
-    make_spike_raster_figure,
+    make_spike_raster_figures,
     shared_channel_labels,
     well_label,
 ):
-    baseline_fig = make_spike_raster_figure(
+    baseline_display_fig, baseline_fig = make_spike_raster_figures(
         "Baseline",
         baseline_well_data,
         shared_channel_labels,
         well_label,
         baseline_plot_settings,
     )
-    exposure_fig = make_spike_raster_figure(
+    exposure_display_fig, exposure_fig = make_spike_raster_figures(
         "Exposure",
         exposure_well_data,
         shared_channel_labels,
         well_label,
         exposure_plot_settings,
     )
-    return baseline_fig, exposure_fig
+    return (
+        baseline_display_fig,
+        baseline_fig,
+        exposure_display_fig,
+        exposure_fig,
+    )
 
 
 @app.cell(hide_code=True)
@@ -851,6 +880,7 @@ def _(
             mo.md("### Figure"),
             figure_width,
             figure_height,
+            mo.md("Figure height sets the download height; live previews add space for the time axis."),
             display_dpi,
             download_dpi,
             x_pad_left,
@@ -936,9 +966,11 @@ def _(
 
 @app.cell(hide_code=True)
 def _(
+    baseline_display_fig,
     baseline_fig,
     baseline_plot_settings,
     download_dpi,
+    exposure_display_fig,
     exposure_fig,
     exposure_plot_settings,
     mo,
@@ -984,7 +1016,7 @@ def _(
     baseline_panel = mo.vstack(
         [
             mo.md("### Baseline"),
-            baseline_fig,
+            baseline_display_fig,
             _plot_download(baseline_fig, "Baseline", well_label, baseline_plot_settings),
         ],
         align="start",
@@ -993,7 +1025,7 @@ def _(
     exposure_panel = mo.vstack(
         [
             mo.md("### Exposure"),
-            exposure_fig,
+            exposure_display_fig,
             _plot_download(exposure_fig, "Exposure", well_label, exposure_plot_settings),
         ],
         align="start",
