@@ -349,7 +349,6 @@ def _():
                 linewidth=settings.spike_count_trace_line_width,
             )
         trace_ax.set_ylim(bottom=0)
-        trace_ax.set_title(title or f"Raster Plot for Well {well_label}")
         trace_ax.tick_params(axis="x", bottom=False, labelbottom=False)
         trace_ax.tick_params(axis="y", left=False, labelleft=False)
         trace_ax.grid(False)
