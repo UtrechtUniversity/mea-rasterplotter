@@ -349,7 +349,6 @@ def _():
                 linewidth=settings.spike_count_trace_line_width,
             )
         trace_ax.set_ylim(bottom=0)
-        trace_ax.set_title(title or f"Raster Plot for Well {well_label}")
         trace_ax.tick_params(axis="x", bottom=False, labelbottom=False)
         trace_ax.tick_params(axis="y", left=False, labelleft=False)
         trace_ax.grid(False)
@@ -974,6 +973,8 @@ def _(
     exposure_fig,
     exposure_plot_settings,
     mo,
+    resolved_baseline_csv,
+    resolved_exposure_csv,
     well_label,
 ):
     import io
@@ -993,21 +994,21 @@ def _(
         return buffer.getvalue()
 
 
-    def _download_filename(dataset_label: str, well_label: str, settings, dpi: int) -> str:
+    def _download_filename(source_csv, well_label: str, settings) -> str:
         safe_well = re.sub(r"[^A-Za-z0-9_.-]+", "-", well_label or "none").strip("-")
         start_time = min(settings.start_time, settings.end_time)
         end_time = max(settings.start_time, settings.end_time)
         return (
-            f"{dataset_label.lower()}_well-{safe_well}_"
-            f"{start_time:g}-{end_time:g}s_{dpi}dpi.png"
+            f"{source_csv.stem}_{safe_well}_"
+            f"{start_time:g}-{end_time:g}s.png"
         )
 
 
-    def _plot_download(fig, dataset_label: str, well_label: str, settings):
+    def _plot_download(fig, dataset_label: str, source_csv, well_label: str, settings):
         dpi = int(download_dpi.value)
         return mo.download(
             data=lambda: _figure_png_bytes(fig, dpi),
-            filename=_download_filename(dataset_label, well_label, settings, dpi),
+            filename=_download_filename(source_csv, well_label, settings),
             mimetype="image/png",
             label=f"Download {dataset_label.lower()} PNG",
         )
@@ -1016,8 +1017,17 @@ def _(
     baseline_panel = mo.vstack(
         [
             mo.md("### Baseline"),
-            baseline_display_fig,
-            _plot_download(baseline_fig, "Baseline", well_label, baseline_plot_settings),
+            mo.vstack(
+                [
+                    baseline_display_fig,
+                    _plot_download(
+                        baseline_fig, "Baseline", resolved_baseline_csv,
+                        well_label, baseline_plot_settings,
+                    ),
+                ],
+                align="center",
+                gap=0.5,
+            ).style({"width": "fit-content", "max-width": "100%"}),
         ],
         align="start",
         gap=0.5,
@@ -1025,8 +1035,17 @@ def _(
     exposure_panel = mo.vstack(
         [
             mo.md("### Exposure"),
-            exposure_display_fig,
-            _plot_download(exposure_fig, "Exposure", well_label, exposure_plot_settings),
+            mo.vstack(
+                [
+                    exposure_display_fig,
+                    _plot_download(
+                        exposure_fig, "Exposure", resolved_exposure_csv,
+                        well_label, exposure_plot_settings,
+                    ),
+                ],
+                align="center",
+                gap=0.5,
+            ).style({"width": "fit-content", "max-width": "100%"}),
         ],
         align="start",
         gap=0.5,
@@ -1045,28 +1064,16 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Summary
+    # Info
     """)
     return
 
 
 @app.cell
-def _(
-    baseline_well_data,
-    exposure_well_data,
-    mo,
-    shared_channel_labels,
-    well_labels,
-):
+def _(baseline_display_fig, exposure_display_fig, mo):
     mo.md(
-        "\n".join(
-            [
-                f"- Available wells across both files: `{len(well_labels)}`",
-                f"- Baseline spikes in current view: `{baseline_well_data.height}`",
-                f"- Exposure spikes in current view: `{exposure_well_data.height}`",
-                f"- Shared channels shown: `{len(shared_channel_labels)}`",
-            ]
-        )
+        f"Baseline trace y-axis maximum: **{baseline_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**\n\n"
+        f"Exposure trace y-axis maximum: **{exposure_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**"
     )
     return
 
