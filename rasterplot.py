@@ -1017,10 +1017,17 @@ def _(
     baseline_panel = mo.vstack(
         [
             mo.md("### Baseline"),
-            baseline_display_fig,
-            _plot_download(
-                baseline_fig, "Baseline", resolved_baseline_csv, well_label, baseline_plot_settings
-            ),
+            mo.vstack(
+                [
+                    baseline_display_fig,
+                    _plot_download(
+                        baseline_fig, "Baseline", resolved_baseline_csv,
+                        well_label, baseline_plot_settings,
+                    ),
+                ],
+                align="center",
+                gap=0.5,
+            ).style({"width": "fit-content", "max-width": "100%"}),
         ],
         align="start",
         gap=0.5,
@@ -1028,10 +1035,17 @@ def _(
     exposure_panel = mo.vstack(
         [
             mo.md("### Exposure"),
-            exposure_display_fig,
-            _plot_download(
-                exposure_fig, "Exposure", resolved_exposure_csv, well_label, exposure_plot_settings
-            ),
+            mo.vstack(
+                [
+                    exposure_display_fig,
+                    _plot_download(
+                        exposure_fig, "Exposure", resolved_exposure_csv,
+                        well_label, exposure_plot_settings,
+                    ),
+                ],
+                align="center",
+                gap=0.5,
+            ).style({"width": "fit-content", "max-width": "100%"}),
         ],
         align="start",
         gap=0.5,
