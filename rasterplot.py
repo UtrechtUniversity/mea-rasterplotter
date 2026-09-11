@@ -1050,28 +1050,16 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Summary
+    # Info
     """)
     return
 
 
 @app.cell
-def _(
-    baseline_well_data,
-    exposure_well_data,
-    mo,
-    shared_channel_labels,
-    well_labels,
-):
+def _(baseline_display_fig, exposure_display_fig, mo):
     mo.md(
-        "\n".join(
-            [
-                f"- Available wells across both files: `{len(well_labels)}`",
-                f"- Baseline spikes in current view: `{baseline_well_data.height}`",
-                f"- Exposure spikes in current view: `{exposure_well_data.height}`",
-                f"- Shared channels shown: `{len(shared_channel_labels)}`",
-            ]
-        )
+        f"Baseline trace y-axis maximum: **{baseline_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**\n\n"
+        f"Exposure trace y-axis maximum: **{exposure_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**"
     )
     return
 
