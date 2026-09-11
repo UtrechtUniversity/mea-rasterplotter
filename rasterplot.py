@@ -973,6 +973,8 @@ def _(
     exposure_fig,
     exposure_plot_settings,
     mo,
+    resolved_baseline_csv,
+    resolved_exposure_csv,
     well_label,
 ):
     import io
@@ -992,21 +994,21 @@ def _(
         return buffer.getvalue()
 
 
-    def _download_filename(dataset_label: str, well_label: str, settings, dpi: int) -> str:
+    def _download_filename(source_csv, well_label: str, settings) -> str:
         safe_well = re.sub(r"[^A-Za-z0-9_.-]+", "-", well_label or "none").strip("-")
         start_time = min(settings.start_time, settings.end_time)
         end_time = max(settings.start_time, settings.end_time)
         return (
-            f"{dataset_label.lower()}_well-{safe_well}_"
-            f"{start_time:g}-{end_time:g}s_{dpi}dpi.png"
+            f"{source_csv.stem}_{safe_well}_"
+            f"{start_time:g}-{end_time:g}s.png"
         )
 
 
-    def _plot_download(fig, dataset_label: str, well_label: str, settings):
+    def _plot_download(fig, dataset_label: str, source_csv, well_label: str, settings):
         dpi = int(download_dpi.value)
         return mo.download(
             data=lambda: _figure_png_bytes(fig, dpi),
-            filename=_download_filename(dataset_label, well_label, settings, dpi),
+            filename=_download_filename(source_csv, well_label, settings),
             mimetype="image/png",
             label=f"Download {dataset_label.lower()} PNG",
         )
@@ -1016,7 +1018,9 @@ def _(
         [
             mo.md("### Baseline"),
             baseline_display_fig,
-            _plot_download(baseline_fig, "Baseline", well_label, baseline_plot_settings),
+            _plot_download(
+                baseline_fig, "Baseline", resolved_baseline_csv, well_label, baseline_plot_settings
+            ),
         ],
         align="start",
         gap=0.5,
@@ -1025,7 +1029,9 @@ def _(
         [
             mo.md("### Exposure"),
             exposure_display_fig,
-            _plot_download(exposure_fig, "Exposure", well_label, exposure_plot_settings),
+            _plot_download(
+                exposure_fig, "Exposure", resolved_exposure_csv, well_label, exposure_plot_settings
+            ),
         ],
         align="start",
         gap=0.5,
