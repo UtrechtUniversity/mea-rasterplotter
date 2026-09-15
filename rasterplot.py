@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.24.0"
+__generated_with = "0.24.2"
 app = marimo.App(width="full")
 
 
@@ -1071,10 +1071,11 @@ def _(mo):
 
 @app.cell
 def _(baseline_display_fig, exposure_display_fig, mo):
-    mo.md(
-        f"Baseline trace y-axis maximum: **{baseline_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**\n\n"
-        f"Exposure trace y-axis maximum: **{exposure_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**"
-    )
+    mo.md(f"""
+    Baseline trace y-axis maximum: **{baseline_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**
+
+    Exposure trace y-axis maximum: **{exposure_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**
+    """)
     return
 
 
