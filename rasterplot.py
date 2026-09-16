@@ -446,45 +446,124 @@ def _():
         build_spike_rate_trace,
         combine_available_wells,
         filter_well_for_plot,
+        filter_well_window,
         load_spike_csv,
         make_eventplot_figure,
         mo,
+        np,
+        pl,
         sorted_channel_union,
         timestamp_slider_bounds,
     )
 
 
 @app.cell
-def _(build_event_series, build_spike_rate_trace, make_eventplot_figure):
+def _(
+    available_wells,
+    build_spike_rate_trace,
+    filter_well_window,
+    np,
+    pl,
+    timestamp_slider_bounds,
+):
+    def build_full_spike_rate_trace(
+        df: pl.DataFrame,
+        well_label: str,
+        recording_bounds: tuple[float, float],
+        electrode_count: int,
+        *,
+        smoothing_method: str = "exponential",
+        exponential_tau_seconds: float = 0.100,
+        gaussian_width_factor: float = 2.5,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Filter one well on the recording's fixed grid, before any display crop."""
+        recording_start, recording_end = recording_bounds
+        well_spikes = filter_well_window(df, well_label, recording_start, recording_end)
+        return build_spike_rate_trace(
+            well_spikes,
+            recording_start,
+            recording_end,
+            electrode_count,
+            smoothing_method=smoothing_method,
+            exponential_tau_seconds=exponential_tau_seconds,
+            gaussian_width_factor=gaussian_width_factor,
+        )
+
+
+    def shared_spike_rate_max(
+        recordings: tuple[pl.DataFrame, ...],
+        electrode_count: int,
+        *,
+        smoothing_method: str = "exponential",
+        exponential_tau_seconds: float = 0.100,
+        gaussian_width_factor: float = 2.5,
+    ) -> float:
+        """Find the largest per-well filtered rate across complete recordings."""
+        maximum = 0.0
+        for recording in recordings:
+            recording_bounds = timestamp_slider_bounds(recording)
+            for well in available_wells(recording):
+                bin_edges, rates = build_full_spike_rate_trace(
+                    recording,
+                    well,
+                    recording_bounds,
+                    electrode_count,
+                    smoothing_method=smoothing_method,
+                    exponential_tau_seconds=exponential_tau_seconds,
+                    gaussian_width_factor=gaussian_width_factor,
+                )
+                maximum = max(maximum, float(np.max(rates, initial=0.0)))
+                # Keep only the maximum; do not retain full traces for the whole plate.
+                del bin_edges, rates
+        return maximum if maximum > 0 else 1.0
+
+
+    def crop_spike_rate_trace(
+        full_trace: tuple[np.ndarray, np.ndarray],
+        start_time: float,
+        end_time: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Select existing samples without rebinning or restarting the filter."""
+        bin_edges, rates = full_trace
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        first = int(np.searchsorted(bin_centers, min(start_time, end_time), side="left"))
+        stop = int(np.searchsorted(bin_centers, max(start_time, end_time), side="right"))
+        return bin_edges[first : stop + 1], rates[first:stop]
+
+
+    return (
+        build_full_spike_rate_trace,
+        crop_spike_rate_trace,
+        shared_spike_rate_max,
+    )
+
+
+@app.cell
+def _(build_event_series, crop_spike_rate_trace, make_eventplot_figure, np):
     def make_spike_raster_figures(
         dataset_label: str,
         well_spikes,
         channel_labels: list[str],
         well_label: str,
         settings,
+        full_spike_rate_trace: tuple[np.ndarray, np.ndarray],
+        spike_rate_y_max: float,
     ):
-        """Build a time-labelled preview and the original download from shared data."""
-        window_start = min(settings.start_time, settings.end_time)
-        window_end = max(settings.start_time, settings.end_time)
+        """Build preview and download with the same full-recording trace and scale."""
         events = build_event_series(well_spikes, channel_labels)
-        bin_edges, rates = build_spike_rate_trace(
-            well_spikes,
-            window_start,
-            window_end,
-            len(channel_labels),
-            smoothing_method=settings.spike_count_smoothing_method,
-            exponential_tau_seconds=settings.spike_count_exponential_tau_seconds,
-            gaussian_width_factor=settings.spike_count_gaussian_width_factor,
+        bin_edges, rates = crop_spike_rate_trace(
+            full_spike_rate_trace, settings.start_time, settings.end_time
         )
-        display_fig, download_fig = (
-            make_eventplot_figure(
+        figures = []
+        for show_time_axis in (True, False):
+            fig = make_eventplot_figure(
                 events, channel_labels, bin_edges, rates, well_label, settings,
                 title=f"{dataset_label} Raster Plot for Well {well_label}",
                 show_time_axis=show_time_axis,
             )
-            for show_time_axis in (True, False)
-        )
-        return display_fig, download_fig
+            fig.axes[0].set_ylim(0, spike_rate_y_max)
+            figures.append(fig)
+        return tuple(figures)
 
 
     return (make_spike_raster_figures,)
@@ -791,14 +870,81 @@ def _(
 
 @app.cell
 def _(
+    spike_count_exponential_tau_ms,
+    spike_count_gaussian_width_factor,
+    spike_count_smoothing_method,
+):
+    # Histogram calculations depend on filtering controls, not display settings.
+    spike_rate_smoothing_options = {
+        "smoothing_method": spike_count_smoothing_method.value,
+        "exponential_tau_seconds": float(spike_count_exponential_tau_ms.value) / 1000.0,
+        "gaussian_width_factor": float(spike_count_gaussian_width_factor.value),
+    }
+    return (spike_rate_smoothing_options,)
+
+
+@app.cell
+def _(
+    baseline_data,
+    exposure_data,
+    shared_channel_labels,
+    shared_spike_rate_max,
+    spike_rate_smoothing_options,
+):
+    shared_spike_rate_y_max = shared_spike_rate_max(
+        (baseline_data, exposure_data),
+        len(shared_channel_labels),
+        **spike_rate_smoothing_options,
+    )
+    return (shared_spike_rate_y_max,)
+
+
+@app.cell
+def _(selected_well):
+    well_label = "" if selected_well.value is None else str(selected_well.value).strip()
+    return (well_label,)
+
+
+@app.cell
+def _(
+    baseline_data,
+    baseline_slider_start,
+    baseline_slider_stop,
+    build_full_spike_rate_trace,
+    exposure_data,
+    exposure_slider_start,
+    exposure_slider_stop,
+    shared_channel_labels,
+    spike_rate_smoothing_options,
+    well_label,
+):
+    # Retain only this well's full traces so changing windows just crops arrays.
+    baseline_full_spike_rate_trace = build_full_spike_rate_trace(
+        baseline_data,
+        well_label,
+        (baseline_slider_start, baseline_slider_stop),
+        len(shared_channel_labels),
+        **spike_rate_smoothing_options,
+    )
+    exposure_full_spike_rate_trace = build_full_spike_rate_trace(
+        exposure_data,
+        well_label,
+        (exposure_slider_start, exposure_slider_stop),
+        len(shared_channel_labels),
+        **spike_rate_smoothing_options,
+    )
+    return baseline_full_spike_rate_trace, exposure_full_spike_rate_trace
+
+
+@app.cell
+def _(
     baseline_data,
     baseline_plot_settings,
     exposure_data,
     exposure_plot_settings,
     filter_well_for_plot,
-    selected_well,
+    well_label,
 ):
-    well_label = "" if selected_well.value is None else str(selected_well.value).strip()
     baseline_well_data = filter_well_for_plot(
         baseline_data,
         well_label,
@@ -809,17 +955,20 @@ def _(
         well_label,
         exposure_plot_settings,
     )
-    return baseline_well_data, exposure_well_data, well_label
+    return baseline_well_data, exposure_well_data
 
 
 @app.cell
 def _(
+    baseline_full_spike_rate_trace,
     baseline_plot_settings,
     baseline_well_data,
+    exposure_full_spike_rate_trace,
     exposure_plot_settings,
     exposure_well_data,
     make_spike_raster_figures,
     shared_channel_labels,
+    shared_spike_rate_y_max,
     well_label,
 ):
     baseline_display_fig, baseline_fig = make_spike_raster_figures(
@@ -828,6 +977,8 @@ def _(
         shared_channel_labels,
         well_label,
         baseline_plot_settings,
+        baseline_full_spike_rate_trace,
+        shared_spike_rate_y_max,
     )
     exposure_display_fig, exposure_fig = make_spike_raster_figures(
         "Exposure",
@@ -835,6 +986,8 @@ def _(
         shared_channel_labels,
         well_label,
         exposure_plot_settings,
+        exposure_full_spike_rate_trace,
+        shared_spike_rate_y_max,
     )
     return (
         baseline_display_fig,
@@ -1070,11 +1223,9 @@ def _(mo):
 
 
 @app.cell
-def _(baseline_display_fig, exposure_display_fig, mo):
-    mo.md(f"""
-    Baseline trace y-axis maximum: **{baseline_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**
-
-    Exposure trace y-axis maximum: **{exposure_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**
+def _(mo, shared_spike_rate_y_max):
+    mo.md(rf"""
+    Shared trace histogram y-axis maximum: **{shared_spike_rate_y_max:g} Hz/electrode**
     """)
     return
 
