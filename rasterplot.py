@@ -347,6 +347,7 @@ def _():
                 spike_rates,
                 color=settings.color,
                 linewidth=settings.spike_count_trace_line_width,
+                clip_on=False,  # Keep the full stroke visible at the zero-rate boundary.
             )
         trace_ax.set_ylim(bottom=0)
         trace_ax.tick_params(axis="x", bottom=False, labelbottom=False)
