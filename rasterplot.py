@@ -349,7 +349,7 @@ def _():
                 linewidth=settings.spike_count_trace_line_width,
                 clip_on=False,  # Keep the full stroke visible at the zero-rate boundary.
             )
-        trace_ax.set_ylim(bottom=0)
+        trace_ax.set_ylim(0, 240)
         trace_ax.tick_params(axis="x", bottom=False, labelbottom=False)
         trace_ax.tick_params(axis="y", left=False, labelleft=False)
         trace_ax.grid(False)
@@ -1059,24 +1059,6 @@ def _(
         wrap=True,
         gap=1.0,
     )
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Info
-    """)
-    return
-
-
-@app.cell
-def _(baseline_display_fig, exposure_display_fig, mo):
-    mo.md(f"""
-    Baseline trace y-axis maximum: **{baseline_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**
-
-    Exposure trace y-axis maximum: **{exposure_display_fig.axes[0].get_ylim()[1]:g} Hz/electrode**
-    """)
     return
 
 
