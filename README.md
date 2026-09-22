@@ -2,16 +2,13 @@
 
 Scripts for extracting spike timings from Axion MultiElectrode Arrays (MEA) `.spk` files, exporting them to CSV, and visualizing the data with rasterplots.
 
-## Status
-
-This project is incomplete and is in development. The notebook UIs are still a little rough.
-
 ## Prerequisites
 
 - Python
 - MATLAB for the Axion `.spk` spike timing extraction, using the vendored
   [AxionFileLoader](https://github.com/axionbio/AxionFileLoader) MATLAB loader.
-- Recommended: [Git](https://git-scm.com/) and [UV](https://docs.astral.sh/uv/).
+- Recommended: [Git](https://git-scm.com/)
+- Optional: [UV](https://docs.astral.sh/uv/).
 
 ## Setup
 
