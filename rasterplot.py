@@ -675,7 +675,7 @@ def _(
             "600": 600,
         },
         value="300",
-        label="Download DPI",
+        label="PNG download DPI",
     )
     line_length = mo.ui.number(
         start=0.05, stop=2.0, step=0.05, value=0.8, label="Spike line length (y-axis units)"
@@ -981,6 +981,8 @@ def _(
     import io
     import re
 
+    from matplotlib import rc_context
+
 
     def _figure_png_bytes(fig, dpi: int) -> bytes:
         buffer = io.BytesIO()
@@ -995,24 +997,46 @@ def _(
         return buffer.getvalue()
 
 
-    def _download_filename(source_csv, well_label: str, settings) -> str:
+    def _figure_svg_bytes(fig) -> bytes:
+        buffer = io.BytesIO()
+        # Keep labels editable without changing the notebook's plotting defaults.
+        with rc_context({"svg.fonttype": "none"}):
+            fig.savefig(
+                buffer,
+                format="svg",
+                bbox_inches="tight",
+                transparent=True,
+                facecolor="none",
+                edgecolor="none",
+            )
+        return buffer.getvalue()
+
+
+    def _download_filename(source_csv, well_label: str, settings, extension: str) -> str:
         safe_well = re.sub(r"[^A-Za-z0-9_.-]+", "-", well_label or "none").strip("-")
         start_time = min(settings.start_time, settings.end_time)
         end_time = max(settings.start_time, settings.end_time)
         return (
             f"{source_csv.stem}_{safe_well}_"
-            f"{start_time:g}-{end_time:g}s.png"
+            f"{start_time:g}-{end_time:g}s.{extension}"
         )
 
 
-    def _plot_download(fig, dataset_label: str, source_csv, well_label: str, settings):
+    def _plot_downloads(fig, dataset_label: str, source_csv, well_label: str, settings):
         dpi = int(download_dpi.value)
-        return mo.download(
+        png_download = mo.download(
             data=lambda: _figure_png_bytes(fig, dpi),
-            filename=_download_filename(source_csv, well_label, settings),
+            filename=_download_filename(source_csv, well_label, settings, "png"),
             mimetype="image/png",
             label=f"Download {dataset_label.lower()} PNG",
         )
+        svg_download = mo.download(
+            data=lambda: _figure_svg_bytes(fig),
+            filename=_download_filename(source_csv, well_label, settings, "svg"),
+            mimetype="image/svg+xml",
+            label=f"Download {dataset_label.lower()} SVG",
+        )
+        return mo.hstack([png_download, svg_download], justify="center", wrap=True, gap=0.5)
 
 
     baseline_panel = mo.vstack(
@@ -1021,7 +1045,7 @@ def _(
             mo.vstack(
                 [
                     baseline_display_fig,
-                    _plot_download(
+                    _plot_downloads(
                         baseline_fig, "Baseline", resolved_baseline_csv,
                         well_label, baseline_plot_settings,
                     ),
@@ -1039,7 +1063,7 @@ def _(
             mo.vstack(
                 [
                     exposure_display_fig,
-                    _plot_download(
+                    _plot_downloads(
                         exposure_fig, "Exposure", resolved_exposure_csv,
                         well_label, exposure_plot_settings,
                     ),
