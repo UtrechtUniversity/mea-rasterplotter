@@ -1012,6 +1012,20 @@ def _(
         return buffer.getvalue()
 
 
+    def _figure_pdf_bytes(fig) -> bytes:
+        buffer = io.BytesIO()
+        with rc_context({"pdf.fonttype": 42}):
+            fig.savefig(
+                buffer,
+                format="pdf",
+                bbox_inches="tight",
+                transparent=True,
+                facecolor="none",
+                edgecolor="none",
+            )
+        return buffer.getvalue()
+
+
     def _download_filename(source_csv, well_label: str, settings, extension: str) -> str:
         safe_well = re.sub(r"[^A-Za-z0-9_.-]+", "-", well_label or "none").strip("-")
         start_time = min(settings.start_time, settings.end_time)
@@ -1036,7 +1050,16 @@ def _(
             mimetype="image/svg+xml",
             label=f"Download {dataset_label.lower()} SVG",
         )
-        return mo.hstack([png_download, svg_download], justify="center", wrap=True, gap=0.5)
+        pdf_download = mo.download(
+            data=lambda: _figure_pdf_bytes(fig),
+            filename=_download_filename(source_csv, well_label, settings, "pdf"),
+            mimetype="application/pdf",
+            label=f"Download {dataset_label.lower()} PDF",
+        )
+        return mo.hstack(
+            [png_download, svg_download, pdf_download],
+            justify="center", wrap=True, gap=0.5,
+        )
 
 
     baseline_panel = mo.vstack(
